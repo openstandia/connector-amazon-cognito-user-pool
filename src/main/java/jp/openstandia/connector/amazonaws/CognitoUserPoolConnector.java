@@ -6,14 +6,13 @@ import com.amazonaws.auth.*;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
 import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProviderClientBuilder;
-import com.amazonaws.services.cognitoidp.model.DescribeUserPoolRequest;
-import com.amazonaws.services.cognitoidp.model.DescribeUserPoolResult;
-import com.amazonaws.services.cognitoidp.model.UserPoolType;
+import com.amazonaws.services.cognitoidp.model.*;
 import org.identityconnectors.common.StringUtil;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.exceptions.ConfigurationException;
 import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
+import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
@@ -143,7 +142,7 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     }
 
     @Override
-    public Uid create(ObjectClass objectClass, Set<Attribute> createAttributes, OperationOptions operationOptions) {
+    public Uid create(ObjectClass objectClass, Set<Attribute> createAttributes, OperationOptions options) {
         if (objectClass == null) {
             throw new InvalidAttributeValueException("ObjectClass value not provided");
         }
@@ -167,7 +166,7 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     }
 
     @Override
-    public Uid update(ObjectClass objectClass, Uid uid, Set<Attribute> replaceAttributes, OperationOptions operationOptions) {
+    public Uid update(ObjectClass objectClass, Uid uid, Set<Attribute> replaceAttributes, OperationOptions options) {
         if (objectClass == null) {
             throw new InvalidAttributeValueException("ObjectClass value not provided");
         }
@@ -179,11 +178,11 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
 
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
             CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-            return usersHandler.updateUser(getUserSchemaMap(), objectClass, uid, replaceAttributes, operationOptions);
+            return usersHandler.updateUser(getUserSchemaMap(), objectClass, uid, replaceAttributes, options);
 
         } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
             CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
-            return groupsHandler.updateGroup(objectClass, uid, replaceAttributes, operationOptions);
+            return groupsHandler.updateGroup(objectClass, uid, replaceAttributes, options);
         }
 
         throw new UnsupportedOperationException("Unsupported object class " + objectClass);
@@ -205,19 +204,28 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     }
 
     @Override
-    public FilterTranslator<CognitoUserPoolFilter> createFilterTranslator(ObjectClass objectClass, OperationOptions operationOptions) {
+    public FilterTranslator<CognitoUserPoolFilter> createFilterTranslator(ObjectClass objectClass, OperationOptions options) {
         return new CognitoUserPoolFilterTranslator();
     }
 
     @Override
-    public void executeQuery(ObjectClass objectClass, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions operationOptions) {
+    public void executeQuery(ObjectClass objectClass, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
-            CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-            usersHandler.getUsers(getUserSchemaMap(), filter, resultsHandler, operationOptions);
+            try {
+                CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
+                usersHandler.getUsers(getUserSchemaMap(), filter, resultsHandler, options);
+            } catch (UserNotFoundException e) {
+                // TODO: fix attributeValue. Currently it isn't uid...
+                throw new UnknownUidException(new Uid(filter.attributeValue), objectClass);
+            }
 
         } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
-            CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
-            groupsHandler.getGroups(filter, resultsHandler, operationOptions);
+            try {
+                CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
+                groupsHandler.getGroups(filter, resultsHandler, options);
+            } catch (ResourceNotFoundException e) {
+                throw new UnknownUidException(new Uid(filter.attributeValue), objectClass);
+            }
 
         } else {
             throw new UnsupportedOperationException("Unsupported object class " + objectClass);

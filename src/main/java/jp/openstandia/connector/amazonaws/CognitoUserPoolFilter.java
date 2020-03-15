@@ -4,6 +4,7 @@ import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueE
 import org.identityconnectors.framework.common.objects.AttributeInfo;
 import org.identityconnectors.framework.common.objects.AttributeInfoBuilder;
 import org.identityconnectors.framework.common.objects.Name;
+import org.identityconnectors.framework.common.objects.Uid;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -31,6 +32,10 @@ public class CognitoUserPoolFilter {
 
     public boolean isByName() {
         return attributeName.equals(Name.NAME) && filterType == FilterType.EXACT_MATCH;
+    }
+
+    public boolean isByUid() {
+        return attributeName.equals(Uid.NAME) && filterType == FilterType.EXACT_MATCH;
     }
 
     public enum FilterType {

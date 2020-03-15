@@ -8,6 +8,7 @@ import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 
 import java.time.ZonedDateTime;
+import java.util.List;
 import java.util.Set;
 
 import static jp.openstandia.connector.amazonaws.CognitoUtils.checkCognitoResult;
@@ -29,12 +30,17 @@ public class CognitoGroupHandler {
     private static final String ATTR_CREATION_DATE = "CreationDate";
     private static final String ATTR_LAST_MODIFIED_DATE = "LastModifiedDate";
 
+    // Association
+    private static final String ATTR_USERS = "users";
+
     private final CognitoUserPoolConfiguration configuration;
     private final AWSCognitoIdentityProvider client;
+    private final CognitoUserGroupHandler userGroupHandler;
 
     public CognitoGroupHandler(CognitoUserPoolConfiguration configuration, AWSCognitoIdentityProvider client) {
         this.configuration = configuration;
         this.client = client;
+        this.userGroupHandler = new CognitoUserGroupHandler(configuration, client);
     }
 
     public ObjectClassInfo getGroupSchema(UserPoolType userPoolType) {
@@ -81,6 +87,14 @@ public class CognitoGroupHandler {
                 .setReturnedByDefault(true)
                 .build());
 
+        // Association
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_USERS)
+                .setCreateable(true)
+                .setUpdateable(true)
+                .setReturnedByDefault(false)
+                .setMultiValued(true)
+                .build());
+
         ObjectClassInfo groupSchemaInfo = builder.build();
 
         LOGGER.info("The constructed Group core schema: {0}", groupSchemaInfo);
@@ -103,7 +117,10 @@ public class CognitoGroupHandler {
         CreateGroupRequest request = new CreateGroupRequest()
                 .withUserPoolId(configuration.getUserPoolID());
 
-        attributes.stream().forEach(a -> {
+        List<Object> users = null;
+        ;
+
+        for (Attribute a : attributes) {
             switch (a.getName()) {
                 case "__UID__":
                 case "__NAME__":
@@ -118,15 +135,26 @@ public class CognitoGroupHandler {
                 case ATTR_ROLE_ARN:
                     request.setRoleArn(AttributeUtil.getAsStringValue(a));
                     break;
+                case ATTR_USERS:
+                    users = a.getValue();
+                    break;
             }
-        });
+        }
 
         CreateGroupResult result = client.createGroup(request);
 
         checkCognitoResult(result, "CreateGroup");
 
         GroupType group = result.getGroup();
-        return new Uid(group.getGroupName());
+        Uid newUid = new Uid(group.getGroupName(), group.getGroupName());
+
+        // We need to call another API to add/remove user for this group.
+        // It means that we can't execute this update as a single transaction.
+        // Therefore, Cognito data may be inconsistent if below calling is failed.
+        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
+        userGroupHandler.updateUsersToGroup(newUid, users);
+
+        return newUid;
     }
 
     /**
@@ -148,7 +176,9 @@ public class CognitoGroupHandler {
                 .withUserPoolId(configuration.getUserPoolID())
                 .withGroupName(uid.getUidValue());
 
-        replaceAttributes.stream().forEach(a -> {
+        List<Object> users = null;
+
+        for (Attribute a : replaceAttributes) {
             switch (a.getName()) {
                 case ATTR_DESCRIPTION:
                     request.setDescription(AttributeUtil.getAsStringValue(a));
@@ -159,8 +189,11 @@ public class CognitoGroupHandler {
                 case ATTR_ROLE_ARN:
                     request.setRoleArn(AttributeUtil.getAsStringValue(a));
                     break;
+                case ATTR_USERS:
+                    users = a.getValue();
+                    break;
             }
-        });
+        }
 
         try {
             UpdateGroupResult result = client.updateGroup(request);
@@ -171,8 +204,15 @@ public class CognitoGroupHandler {
             throw new UnknownUidException(uid, objectClass);
         }
 
+        // We need to call another API to add/remove user for this group.
+        // It means that we can't execute this update as a single transaction.
+        // Therefore, Cognito data may be inconsistent if below calling is failed.
+        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
+        userGroupHandler.updateUsersToGroup(uid, users);
+
         return uid;
     }
+
 
     /**
      * The spec for DeleteGroup:
@@ -188,6 +228,8 @@ public class CognitoGroupHandler {
         }
 
         try {
+            userGroupHandler.removeAllUsers(uid.getUidValue());
+
             DeleteGroupResult result = client.deleteGroup(new DeleteGroupRequest()
                     .withUserPoolId(configuration.getUserPoolID())
                     .withGroupName(uid.getUidValue()));
@@ -205,12 +247,12 @@ public class CognitoGroupHandler {
      *
      * @param filter
      * @param resultsHandler
-     * @param operationOptions
+     * @param options
      */
     public void getGroups(CognitoUserPoolFilter filter,
-                          ResultsHandler resultsHandler, OperationOptions operationOptions) {
-        if (filter != null && filter.isByName()) {
-            getGroupByName(filter.attributeValue, resultsHandler, operationOptions);
+                          ResultsHandler resultsHandler, OperationOptions options) {
+        if (filter != null && (filter.isByName() || filter.isByUid())) {
+            getGroupByName(filter.attributeValue, resultsHandler, options);
             return;
         }
 
@@ -228,7 +270,7 @@ public class CognitoGroupHandler {
 
             result.getGroups().stream()
                     .forEach(u -> {
-                        resultsHandler.handle(toConnectorObject(u));
+                        resultsHandler.handle(toConnectorObject(u, options));
                     });
 
             nextToken = result.getNextToken();
@@ -237,19 +279,51 @@ public class CognitoGroupHandler {
     }
 
     private void getGroupByName(String groupName,
-                                ResultsHandler resultsHandler, OperationOptions operationOptions) {
+                                ResultsHandler resultsHandler, OperationOptions options) {
         GetGroupResult result = client.getGroup(new GetGroupRequest()
                 .withUserPoolId(configuration.getUserPoolID())
                 .withGroupName(groupName));
 
         checkCognitoResult(result, "GetGroup");
 
-        resultsHandler.handle(toConnectorObject(result.getGroup()));
+        resultsHandler.handle(toConnectorObject(result.getGroup(), options));
+    }
+
+    private ConnectorObject toConnectorObject(GroupType g, OperationOptions options) {
+        String[] attributesToGet = options.getAttributesToGet();
+        if (attributesToGet == null) {
+            return toConnectorObject(g);
+        }
+
+        ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
+                .setObjectClass(ObjectClass.GROUP)
+                .setUid(g.getGroupName())
+                .setName(g.getGroupName());
+
+        for (String getAttr : attributesToGet) {
+            switch (getAttr) {
+                case ATTR_DESCRIPTION:
+                    builder.addAttribute(ATTR_DESCRIPTION, g.getDescription());
+                case ATTR_PRECEDENCE:
+                    builder.addAttribute(ATTR_PRECEDENCE, g.getPrecedence());
+                case ATTR_ROLE_ARN:
+                    builder.addAttribute(ATTR_ROLE_ARN, g.getRoleArn());
+                case ATTR_CREATION_DATE:
+                    builder.addAttribute(ATTR_CREATION_DATE, toZoneDateTime(g.getCreationDate()));
+                case ATTR_LAST_MODIFIED_DATE:
+                    builder.addAttribute(ATTR_LAST_MODIFIED_DATE, toZoneDateTime(g.getLastModifiedDate()));
+                case ATTR_USERS:
+                    builder.addAttribute(ATTR_USERS, userGroupHandler.getUsersInGroup(g.getGroupName()));
+            }
+        }
+
+        return builder.build();
     }
 
     private ConnectorObject toConnectorObject(GroupType g) {
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
-                .setUid(g.getGroupName())
+                .setObjectClass(ObjectClass.GROUP)
+                .setUid(new Uid(g.getGroupName(), g.getGroupName()))
                 .setName(g.getGroupName())
                 .addAttribute(ATTR_DESCRIPTION, g.getDescription())
                 .addAttribute(ATTR_PRECEDENCE, g.getPrecedence())

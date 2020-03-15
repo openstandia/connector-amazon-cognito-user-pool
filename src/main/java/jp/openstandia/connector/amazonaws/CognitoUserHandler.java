@@ -36,14 +36,19 @@ public class CognitoUserHandler {
     private static final String ATTR_USER_LAST_MODIFIED_DATE = "UserLastModifiedDate";
     private static final String ATTR_USER_STATUS = "UserStatus";
 
+    // Association
+    private static final String ATTR_GROUPS = "groups";
+
     private static final CognitoUserPoolFilter.SubFilter SUB_FILTER = new CognitoUserPoolFilter.SubFilter();
 
     private final CognitoUserPoolConfiguration configuration;
     private final AWSCognitoIdentityProvider client;
+    private final CognitoUserGroupHandler userGroupHandler;
 
     public CognitoUserHandler(CognitoUserPoolConfiguration configuration, AWSCognitoIdentityProvider client) {
         this.configuration = configuration;
         this.client = client;
+        this.userGroupHandler = new CognitoUserGroupHandler(configuration, client);
     }
 
     public ObjectClassInfo getUserSchema(UserPoolType userPoolType) {
@@ -131,6 +136,14 @@ public class CognitoUserHandler {
                 .setReturnedByDefault(true)
                 .build());
 
+        // Association
+        attrInfoList.add(AttributeInfoBuilder.define(ATTR_GROUPS)
+                .setCreateable(true)
+                .setUpdateable(true)
+                .setReturnedByDefault(false)
+                .setMultiValued(true)
+                .build());
+
         builder.addAllAttributeInfo(attrInfoList);
 
         ObjectClassInfo userSchemaInfo = builder.build();
@@ -157,12 +170,15 @@ public class CognitoUserHandler {
                 .withUserPoolId(configuration.getUserPoolID());
 
         boolean userEnabled = true;
+        List<Object> groups = null;
 
         for (Attribute a : attributes) {
             if (a.getName().equals(Name.NAME)) {
                 request.setUsername(AttributeUtil.getAsStringValue(a));
             } else if (a.getName().equals(OperationalAttributes.ENABLE_NAME)) {
                 userEnabled = AttributeUtil.getBooleanValue(a);
+            } else if (a.getName().equals(ATTR_GROUPS)) {
+                groups = a.getValue();
             } else {
                 AttributeType attr = toCognitoAttribute(schema, a);
                 request = request.withUserAttributes(attr);
@@ -191,7 +207,13 @@ public class CognitoUserHandler {
             disableUser(newUid, newUid.getNameHint());
         }
 
-        return new Uid(user.getAttributes().stream().filter(a -> a.getName().equals(ATTR_SUB)).findFirst().get().getValue());
+        // We need to call another API to add/remove group for this user.
+        // It means that we can't execute this update as a single transaction.
+        // Therefore, Cognito data may be inconsistent if below calling is failed.
+        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
+        userGroupHandler.updateGroupsToUser(newUid.getNameHint(), groups);
+
+        return newUid;
     }
 
     /**
@@ -217,6 +239,7 @@ public class CognitoUserHandler {
 //        Collection<String> deleteAttrs = new ArrayList<>();
 
         Boolean userEnabled = null;
+        List<Object> groups = null;
 
         for (Attribute attr : replaceAttributes) {
             // When the IDM decided to delete the attribute, the value is null
@@ -224,6 +247,8 @@ public class CognitoUserHandler {
                 updateAttrs.add(toCognitoAttributeForDelete(attr));
             } else if (attr.getName().equals(OperationalAttributes.ENABLE_NAME)) {
                 userEnabled = AttributeUtil.getBooleanValue(attr);
+            } else if (attr.getName().equals(ATTR_GROUPS)) {
+                groups = attr.getValue();
             } else {
                 updateAttrs.add(toCognitoAttribute(schema, attr));
             }
@@ -247,7 +272,7 @@ public class CognitoUserHandler {
         // We need to call another API to delete attributes.
         // It means that we can't execute this update as a single transaction.
         // Therefore, Cognito data may be inconsistent if below calling is failed.
-        // Although this connector don't handle this situation, IDM can retry the update to resolve this inconsistency.
+        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
 //        if (deleteAttrs.size() > 0) {
 //            AdminDeleteUserAttributesRequest request = new AdminDeleteUserAttributesRequest()
 //                    .withUserPoolId(configuration.getUserPoolID())
@@ -261,8 +286,14 @@ public class CognitoUserHandler {
         // We need to call another API to enable/disable user.
         // It means that we can't execute this update as a single transaction.
         // Therefore, Cognito data may be inconsistent if below calling is failed.
-        // Although this connector don't handle this situation, IDM can retry the update to resolve this inconsistency.
+        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
         enableOrDisableUser(uid, name, userEnabled);
+
+        // We need to call another API to add/remove group for this user.
+        // It means that we can't execute this update as a single transaction.
+        // Therefore, Cognito data may be inconsistent if below calling is failed.
+        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
+        userGroupHandler.updateGroupsToUser(name, groups);
 
         return uid;
     }
@@ -340,7 +371,7 @@ public class CognitoUserHandler {
 
         // Fallback
         // If uid doesn't have Name hint, find the user by uid(sub)
-        UserType user = findUserByUid(uid.getUidValue(), options);
+        UserType user = findUserByUid(uid.getUidValue());
         if (user == null) {
             LOGGER.warn("Not found user when updating or deleting. uid: {0}", uid);
             throw new UnknownUidException(uid, objectClass);
@@ -348,7 +379,7 @@ public class CognitoUserHandler {
         return new Name(user.getUsername());
     }
 
-    private UserType findUserByUid(String uid, OperationOptions operationOptions) {
+    private UserType findUserByUid(String uid) {
         ListUsersResult result = client.listUsers(new ListUsersRequest()
                 .withUserPoolId(configuration.getUserPoolID())
                 .withFilter(SUB_FILTER.toFilterString(uid)));
@@ -366,6 +397,16 @@ public class CognitoUserHandler {
         }
 
         return result.getUsers().get(0);
+    }
+
+    private AdminGetUserResult findUserByName(String username) {
+        AdminGetUserResult result = client.adminGetUser(new AdminGetUserRequest()
+                .withUserPoolId(configuration.getUserPoolID())
+                .withUsername(username));
+
+        checkCognitoResult(result, "AdminGetUser");
+
+        return result;
     }
 
     public void getUsers(Map<String, AttributeInfo> schema, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
@@ -388,36 +429,71 @@ public class CognitoUserHandler {
             ListUsersResult result = client.listUsers(request);
 
             result.getUsers().stream()
-                    .forEach(u -> resultsHandler.handle(toConnectorObject(schema, u)));
+                    .forEach(u -> resultsHandler.handle(toConnectorObject(schema, u, options)));
 
             paginationToken = result.getPaginationToken();
 
         } while (paginationToken != null);
     }
 
-    private void getUserByName(Map<String, AttributeInfo> schema, String username, ResultsHandler resultsHandler, OperationOptions operationOptions) {
-        AdminGetUserResult result = client.adminGetUser(new AdminGetUserRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withUsername(username));
+    private void getUserByName(Map<String, AttributeInfo> schema, String username, ResultsHandler resultsHandler, OperationOptions options) {
+        String[] attributesToGet = options.getAttributesToGet();
+        if (attributesToGet == null) {
+            AdminGetUserResult result = findUserByName(username);
+            resultsHandler.handle(toConnectorObject(schema, result, options));
+            return;
+        }
 
-        checkCognitoResult(result, "AdminGetUser");
+        final ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
+                .setName(username);
 
-        resultsHandler.handle(toConnectorObject(schema, result));
+        boolean loadFull = false;
+        for (String getAttr : attributesToGet) {
+            switch (getAttr) {
+                case ATTR_GROUPS:
+                    if (options.getAllowPartialAttributeValues() != Boolean.TRUE) {
+                        List<String> groups = userGroupHandler.getGroupsForUser(username);
+                        builder.addAttribute(ATTR_GROUPS, groups);
+                    }
+                default:
+                    loadFull = true;
+            }
+        }
+
+        if (loadFull) {
+            AdminGetUserResult result = findUserByName(username);
+
+            builder.addAttribute(AttributeBuilder.buildEnabled(result.getEnabled()))
+                    .addAttribute(ATTR_USER_CREATE_DATE, CognitoUtils.toZoneDateTime(result.getUserCreateDate()))
+                    .addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUtils.toZoneDateTime(result.getUserLastModifiedDate()))
+                    .addAttribute(ATTR_USER_STATUS, result.getUserStatus());
+
+            for (AttributeType a : result.getUserAttributes()) {
+                if (a.getName().equals(ATTR_SUB)) {
+                    builder.setUid(a.getValue());
+                } else {
+                    AttributeInfo attributeInfo = schema.get(escapeName(a.getName()));
+                    builder.addAttribute(toConnectorAttribute(attributeInfo, a));
+                }
+            }
+        }
+
+        resultsHandler.handle(builder.build());
     }
 
-    private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, AdminGetUserResult result) {
+    private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, AdminGetUserResult result, OperationOptions options) {
         return toConnectorObject(schema, result.getUsername(), result.getEnabled(), result.getUserCreateDate(), result.getUserLastModifiedDate(),
-                result.getUserStatus(), result.getUserAttributes());
+                result.getUserStatus(), result.getUserAttributes(), options);
     }
 
-    private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, UserType u) {
+    private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, UserType u, OperationOptions options) {
         return toConnectorObject(schema, u.getUsername(), u.getEnabled(), u.getUserCreateDate(), u.getUserLastModifiedDate(),
-                u.getUserStatus(), u.getAttributes());
+                u.getUserStatus(), u.getAttributes(), options);
     }
 
     private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, String username, boolean enabled,
                                               Date userCreateDate, Date userLastModifiedDate,
-                                              String status, List<AttributeType> attributes) {
+                                              String status, List<AttributeType> attributes, OperationOptions options) {
         final ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
                 .setName(username)
                 // Metadata
@@ -433,6 +509,15 @@ public class CognitoUserHandler {
                 AttributeInfo attributeInfo = schema.get(escapeName(a.getName()));
                 builder.addAttribute(toConnectorAttribute(attributeInfo, a));
             }
+        }
+
+        if (options.getAllowPartialAttributeValues() != Boolean.TRUE) {
+            List<String> groups = userGroupHandler.getGroupsForUser(username);
+            builder.addAttribute(ATTR_GROUPS, groups);
+        } else {
+            AttributeBuilder ab = new AttributeBuilder();
+            ab.setName(ATTR_GROUPS).setAttributeValueCompleteness(AttributeValueCompleteness.INCOMPLETE);
+            builder.addAttribute(ab.build());
         }
 
         return builder.build();
