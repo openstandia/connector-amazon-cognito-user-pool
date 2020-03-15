@@ -87,7 +87,7 @@ public class CognitoUserPoolFilter {
 
     public static class SubFilter extends CognitoUserPoolFilter {
 
-        private static final Map<String, AttributeInfo> schema = new HashMap(){
+        private static final Map<String, AttributeInfo> schema = new HashMap() {
             {
                 this.put("sub", AttributeInfoBuilder.define("sub"));
             }

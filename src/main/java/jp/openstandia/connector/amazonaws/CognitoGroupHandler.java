@@ -3,23 +3,31 @@ package jp.openstandia.connector.amazonaws;
 import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
 import com.amazonaws.services.cognitoidp.model.*;
 import org.identityconnectors.common.logging.Log;
-import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
+import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 
-import java.util.Map;
+import java.time.ZonedDateTime;
 import java.util.Set;
+
+import static jp.openstandia.connector.amazonaws.CognitoUtils.checkCognitoResult;
+import static jp.openstandia.connector.amazonaws.CognitoUtils.toZoneDateTime;
 
 public class CognitoGroupHandler {
 
     private static final Log LOGGER = Log.getLog(CognitoGroupHandler.class);
 
-    private static final String ATTR_GROUP_CREATION_DATE = "CreationDate";
-    private static final String ATTR_GROUP_DESCRIPTION = "Description";
-    private static final String ATTR_GROUP_GROUP_NAME = "GroupName";
-    private static final String ATTR_GROUP_LAST_MODIFIED_DATE = "LastModifiedDate";
-    private static final String ATTR_GROUP_PRECEDENCE = "Precedence";
-    private static final String ATTR_GROUP_ROLE_ARN = "RoleArn";
+    // Unique and unchangeable within the user pool
+    private static final String ATTR_GROUP_NAME = "GroupName";
+
+    // Attributes
+    private static final String ATTR_DESCRIPTION = "Description";
+    private static final String ATTR_PRECEDENCE = "Precedence";
+    private static final String ATTR_ROLE_ARN = "RoleArn";
+
+    // Metadata
+    private static final String ATTR_CREATION_DATE = "CreationDate";
+    private static final String ATTR_LAST_MODIFIED_DATE = "LastModifiedDate";
 
     private final CognitoUserPoolConfiguration configuration;
     private final AWSCognitoIdentityProvider client;
@@ -39,7 +47,7 @@ public class CognitoGroupHandler {
                 .setCreateable(true)
                 .setUpdateable(false)
                 .setReturnedByDefault(true)
-                .setNativeName(ATTR_GROUP_GROUP_NAME)
+                .setNativeName(ATTR_GROUP_NAME)
                 .build());
         // __NAME__
         builder.addAttributeInfo(AttributeInfoBuilder.define(Name.NAME)
@@ -47,29 +55,29 @@ public class CognitoGroupHandler {
                 .setCreateable(true)
                 .setUpdateable(false)
                 .setReturnedByDefault(true)
-                .setNativeName(ATTR_GROUP_GROUP_NAME)
+                .setNativeName(ATTR_GROUP_NAME)
                 .build());
 
-        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_GROUP_CREATION_DATE)
-                .setType(Integer.class)
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_CREATION_DATE)
+                .setType(ZonedDateTime.class)
                 .setCreateable(false)
                 .setUpdateable(false)
                 .setReturnedByDefault(true)
                 .build());
-        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_GROUP_LAST_MODIFIED_DATE)
-                .setType(Integer.class)
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_LAST_MODIFIED_DATE)
+                .setType(ZonedDateTime.class)
                 .setCreateable(false)
                 .setUpdateable(false)
                 .setReturnedByDefault(true)
                 .build());
-        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_GROUP_DESCRIPTION)
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_DESCRIPTION)
                 .setReturnedByDefault(true)
                 .build());
-        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_GROUP_PRECEDENCE)
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_PRECEDENCE)
                 .setType(Integer.class)
                 .setReturnedByDefault(true)
                 .build());
-        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_GROUP_ROLE_ARN)
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_ROLE_ARN)
                 .setReturnedByDefault(true)
                 .build());
 
@@ -80,6 +88,13 @@ public class CognitoGroupHandler {
         return groupSchemaInfo;
     }
 
+    /**
+     * The spec for CreateGroup:
+     * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateGroup.html
+     *
+     * @param attributes
+     * @return
+     */
     public Uid createGroup(Set<Attribute> attributes) {
         if (attributes == null || attributes.isEmpty()) {
             throw new InvalidAttributeValueException("attributes not provided or empty");
@@ -91,35 +106,32 @@ public class CognitoGroupHandler {
         attributes.stream().forEach(a -> {
             switch (a.getName()) {
                 case "__UID__":
+                case "__NAME__":
                     request.setGroupName(AttributeUtil.getAsStringValue(a));
                     break;
-                case ATTR_GROUP_DESCRIPTION:
+                case ATTR_DESCRIPTION:
                     request.setDescription(AttributeUtil.getAsStringValue(a));
                     break;
-                case ATTR_GROUP_PRECEDENCE:
+                case ATTR_PRECEDENCE:
                     request.setPrecedence(AttributeUtil.getIntegerValue(a));
                     break;
-                case ATTR_GROUP_ROLE_ARN:
+                case ATTR_ROLE_ARN:
                     request.setRoleArn(AttributeUtil.getAsStringValue(a));
                     break;
             }
         });
 
-        CreateGroupResult response = client.createGroup(request);
+        CreateGroupResult result = client.createGroup(request);
 
-        int status = response.getSdkHttpMetadata().getHttpStatusCode();
-        if (status != 200) {
-            throw new ConnectorException(String.format("Failed to createGroup. CreateGroup returned %d error.", status));
-        }
+        checkCognitoResult(result, "CreateGroup");
 
-        GroupType group = response.getGroup();
+        GroupType group = result.getGroup();
         return new Uid(group.getGroupName());
     }
 
     /**
      * The spec for UpdateGroup:
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_UpdateGroup.html
-     *
      *
      * @param objectClass
      * @param uid
@@ -138,69 +150,72 @@ public class CognitoGroupHandler {
 
         replaceAttributes.stream().forEach(a -> {
             switch (a.getName()) {
-                case ATTR_GROUP_DESCRIPTION:
+                case ATTR_DESCRIPTION:
                     request.setDescription(AttributeUtil.getAsStringValue(a));
                     break;
-                case ATTR_GROUP_PRECEDENCE:
+                case ATTR_PRECEDENCE:
                     request.setPrecedence(AttributeUtil.getIntegerValue(a));
                     break;
-                case ATTR_GROUP_ROLE_ARN:
+                case ATTR_ROLE_ARN:
                     request.setRoleArn(AttributeUtil.getAsStringValue(a));
                     break;
             }
         });
 
-        UpdateGroupResult result = client.updateGroup(request);
+        try {
+            UpdateGroupResult result = client.updateGroup(request);
 
-        int status = result.getSdkHttpMetadata().getHttpStatusCode();
-        if (status != 200) {
-            throw new ConnectorException(String.format("Failed to updateGroup. UpdateGroup returned %d error.", status));
+            checkCognitoResult(result, "UpdateGroup");
+        } catch (ResourceNotFoundException e) {
+            LOGGER.warn("Not found group when updating. uid: {0}", uid);
+            throw new UnknownUidException(uid, objectClass);
         }
 
         return uid;
     }
 
+    /**
+     * The spec for DeleteGroup:
+     * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_DeleteGroup.html
+     *
+     * @param objectClass
+     * @param uid
+     * @param options
+     */
     public void deleteGroup(ObjectClass objectClass, Uid uid, OperationOptions options) {
         if (uid == null) {
             throw new InvalidAttributeValueException("uid not provided");
         }
 
-        DeleteGroupResult result = client.deleteGroup(new DeleteGroupRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withGroupName(uid.getUidValue()));
+        try {
+            DeleteGroupResult result = client.deleteGroup(new DeleteGroupRequest()
+                    .withUserPoolId(configuration.getUserPoolID())
+                    .withGroupName(uid.getUidValue()));
 
-        int status = result.getSdkHttpMetadata().getHttpStatusCode();
-        if (status != 200) {
-            throw new ConnectorException(String.format("Failed to deleteGroup. DeleteGroup returned %d error.", status));
+            checkCognitoResult(result, "DeleteGroup");
+        } catch (ResourceNotFoundException e) {
+            LOGGER.warn("Not found group when deleting. uid: {0}", uid);
+            throw new UnknownUidException(uid, objectClass);
         }
     }
-
-    public void getGroupByName(String groupName, ResultsHandler resultsHandler, OperationOptions operationOptions) {
-        GetGroupResult result = client.getGroup(new GetGroupRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withGroupName(groupName));
-
-        int status = result.getSdkHttpMetadata().getHttpStatusCode();
-        if (status != 200) {
-            throw new ConnectorException(String.format("Failed to get group by groupName. GetGroup returned %d status. groupName: %s", status, groupName));
-        }
-
-        resultsHandler.handle(toConnectorObject(result.getGroup()));
-    }
-
 
     /**
      * The spec for ListGroups:
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_ListGroups.html
      *
-     * @param schema
      * @param filter
      * @param resultsHandler
      * @param operationOptions
      */
-    public void getGroups(Map<String, AttributeInfo> schema, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions operationOptions) {
+    public void getGroups(CognitoUserPoolFilter filter,
+                          ResultsHandler resultsHandler, OperationOptions operationOptions) {
+        if (filter != null && filter.isByName()) {
+            getGroupByName(filter.attributeValue, resultsHandler, operationOptions);
+            return;
+        }
+
         // Cannot filter using Cognito API unfortunately...
-        // So we only return all groups here.
+        // So we always return all groups here.
         ListGroupsRequest request = new ListGroupsRequest();
         request.setUserPoolId(configuration.getUserPoolID());
 
@@ -221,14 +236,26 @@ public class CognitoGroupHandler {
         } while (nextToken != null);
     }
 
-    private ConnectorObject toConnectorObject(GroupType g) { ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
-            .setUid(g.getGroupName())
-            .setName(g.getGroupName())
-            .addAttribute(ATTR_GROUP_DESCRIPTION, g.getDescription())
-            .addAttribute(ATTR_GROUP_PRECEDENCE, g.getPrecedence())
-            .addAttribute(ATTR_GROUP_ROLE_ARN, g.getRoleArn())
-            .addAttribute(ATTR_GROUP_CREATION_DATE, g.getCreationDate())
-            .addAttribute(ATTR_GROUP_LAST_MODIFIED_DATE, g.getLastModifiedDate());
+    private void getGroupByName(String groupName,
+                                ResultsHandler resultsHandler, OperationOptions operationOptions) {
+        GetGroupResult result = client.getGroup(new GetGroupRequest()
+                .withUserPoolId(configuration.getUserPoolID())
+                .withGroupName(groupName));
+
+        checkCognitoResult(result, "GetGroup");
+
+        resultsHandler.handle(toConnectorObject(result.getGroup()));
+    }
+
+    private ConnectorObject toConnectorObject(GroupType g) {
+        ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
+                .setUid(g.getGroupName())
+                .setName(g.getGroupName())
+                .addAttribute(ATTR_DESCRIPTION, g.getDescription())
+                .addAttribute(ATTR_PRECEDENCE, g.getPrecedence())
+                .addAttribute(ATTR_ROLE_ARN, g.getRoleArn())
+                .addAttribute(ATTR_CREATION_DATE, toZoneDateTime(g.getCreationDate()))
+                .addAttribute(ATTR_LAST_MODIFIED_DATE, toZoneDateTime(g.getLastModifiedDate()));
 
         return builder.build();
     }

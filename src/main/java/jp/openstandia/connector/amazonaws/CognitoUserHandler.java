@@ -13,24 +13,24 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static jp.openstandia.connector.amazonaws.CognitoUtils.*;
-import static jp.openstandia.connector.amazonaws.CognitoUtils.toAttributeType;
 
 public class CognitoUserHandler {
 
     private static final Log LOGGER = Log.getLog(CognitoUserHandler.class);
 
-    private static final String ATTR_SUB = "sub";
 
     // The username for the user. Must be unique within the user pool.
     // Must be a UTF-8 string between 1 and 128 characters. After the user is created, the username cannot be changed.
     // https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminCreateUser.html
     private static final String ATTR_USERNAME = "username";
 
+    // Also, Unique and unchangeable within the user pool
+    private static final String ATTR_SUB = "sub";
+
     // Standard Attributes
     // https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html
     private static final String ATTR_EMAIL = "email";
     private static final String ATTR_PREFERRED_USERNAME = "preferred_username";
-
 
     // Metadata
     private static final String ATTR_USER_CREATE_DATE = "UserCreateDate";
@@ -91,6 +91,9 @@ public class CognitoUserHandler {
                         case "Number":
                             attrInfo.setType(Integer.class);
                             break;
+                        case "DateTime":
+                            attrInfo.setType(ZonedDateTime.class);
+                            break;
                         case "Boolean":
                             attrInfo.setType(Boolean.class);
                             break;
@@ -135,8 +138,15 @@ public class CognitoUserHandler {
         return userSchemaInfo;
     }
 
-
-    public Uid createUser(Set<Attribute> attributes) {
+    /**
+     * The spec for AdminCreateUser:
+     * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminCreateUser.html
+     *
+     * @param schema
+     * @param attributes
+     * @return
+     */
+    public Uid createUser(Map<String, AttributeInfo> schema, Set<Attribute> attributes) {
         if (attributes == null || attributes.isEmpty()) {
             throw new InvalidAttributeValueException("attributes not provided or empty");
         }
@@ -148,7 +158,7 @@ public class CognitoUserHandler {
             if (a.getName().equals(Name.NAME)) {
                 request.setUsername(AttributeUtil.getAsStringValue(a));
             } else {
-                AttributeType attr = toAttributeType(a);
+                AttributeType attr = toCognitoAttribute(schema, a);
                 request = request.withUserAttributes(attr);
             }
         }
@@ -159,33 +169,27 @@ public class CognitoUserHandler {
             request.setUsername(uuid);
         }
 
-        AdminCreateUserResult response = client.adminCreateUser(request);
+        AdminCreateUserResult result = client.adminCreateUser(request);
 
-        int status = response.getSdkHttpMetadata().getHttpStatusCode();
-        if (status != 200) {
-            throw new ConnectorException(String.format("Failed to create user. AdminCreateUser returned %d status. username: %s", status, request.getUsername()));
-        }
+        checkCognitoResult(result, "AdminCreateUser");
 
-        UserType user = response.getUser();
+        UserType user = result.getUser();
         return new Uid(user.getAttributes().stream().filter(a -> a.getName().equals(ATTR_SUB)).findFirst().get().getValue());
     }
 
-    private Name resolveName(ObjectClass objectClass, Uid uid, OperationOptions options) {
-        Name nameHint = uid.getNameHint();
-        if (nameHint != null) {
-            return nameHint;
-        }
-
-        UserType user = findUserByUid(uid.getUidValue(), null);
-        if (user == null) {
-            LOGGER.warn("Not found user while deleting. uid: {0}", uid);
-            throw new UnknownUidException(uid, objectClass);
-        }
-        return new Name(user.getUsername());
-    }
-
-
-    public Uid updateUser(ObjectClass objectClass, Uid uid, Set<Attribute> replaceAttributes, OperationOptions options) {
+    /**
+     * The spec for AdminUpdateUserAttributes:
+     * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUpdateUserAttributes.html
+     *
+     * @param schema
+     * @param objectClass
+     * @param uid
+     * @param replaceAttributes
+     * @param options
+     * @return
+     */
+    public Uid updateUser(Map<String, AttributeInfo> schema, ObjectClass objectClass,
+                          Uid uid, Set<Attribute> replaceAttributes, OperationOptions options) {
         if (uid == null) {
             throw new InvalidAttributeValueException("uid not provided");
         }
@@ -198,9 +202,9 @@ public class CognitoUserHandler {
         for (Attribute attr : replaceAttributes) {
             // When the IDM decided to delete the attribute, the value is null
             if (attr.getValue() == null) {
-                updateAttrs.add(toAttributeTypeForDelete(attr));
+                updateAttrs.add(toCognitoAttributeForDelete(attr));
             } else {
-                updateAttrs.add(toAttributeType(attr));
+                updateAttrs.add(toCognitoAttribute(schema, attr));
             }
         }
 
@@ -209,11 +213,13 @@ public class CognitoUserHandler {
                     .withUserPoolId(configuration.getUserPoolID())
                     .withUsername(name.getNameValue())
                     .withUserAttributes(updateAttrs);
-            AdminUpdateUserAttributesResult result = client.adminUpdateUserAttributes(request);
+            try {
+                AdminUpdateUserAttributesResult result = client.adminUpdateUserAttributes(request);
 
-            int status = result.getSdkHttpMetadata().getHttpStatusCode();
-            if (status != 200) {
-                throw new ConnectorException(String.format("Failed to update user. AdminUpdateUserAttributes returned %d status. uid: %s", status, uid));
+                checkCognitoResult(result, "AdminUpdateUserAttributes");
+            } catch (UserNotFoundException e) {
+                LOGGER.warn("Not found user when deleting. uid: {0}", uid);
+                throw new UnknownUidException(uid, objectClass);
             }
         }
 
@@ -228,15 +234,20 @@ public class CognitoUserHandler {
 //                    .withUserAttributeNames(deleteAttrs);
 //            AdminDeleteUserAttributesResult result = client.adminDeleteUserAttributes(request);
 //
-//            int status = result.getSdkHttpMetadata().getHttpStatusCode();
-//            if (status != 200) {
-//                throw new ConnectorException(String.format("Failed to update user. AdminDeleteUserAttributes returned %d status. uid: %s", status, uid));
-//            }
+//            checkCognitoResult(result, "AdminDeleteUserAttributes");
 //        }
 
         return uid;
     }
 
+    /**
+     * The spec for AdminDeleteUser:
+     * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminDeleteUser.html
+     *
+     * @param objectClass
+     * @param uid
+     * @param options
+     */
     public void deleteUser(ObjectClass objectClass, Uid uid, OperationOptions options) {
         if (uid == null) {
             throw new InvalidAttributeValueException("uid not provided");
@@ -244,43 +255,60 @@ public class CognitoUserHandler {
 
         Name name = resolveName(objectClass, uid, options);
 
-        AdminDeleteUserResult result = client.adminDeleteUser(new AdminDeleteUserRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withUsername(name.getNameValue()));
+        try {
+            AdminDeleteUserResult result = client.adminDeleteUser(new AdminDeleteUserRequest()
+                    .withUserPoolId(configuration.getUserPoolID())
+                    .withUsername(name.getNameValue()));
 
-        int status = result.getSdkHttpMetadata().getHttpStatusCode();
-        if (status != 200) {
-            throw new ConnectorException(String.format("Failed to delete user. AdminDeleteUser returned %d status. uid: %s", status, uid));
+            checkCognitoResult(result, "AdminDeleteUser");
+        } catch (UserNotFoundException e) {
+            LOGGER.warn("Not found user when deleting. uid: {0}", uid);
+            throw new UnknownUidException(uid, objectClass);
         }
     }
 
-    public UserType findUserByUid(String uid, OperationOptions operationOptions) {
+    private Name resolveName(ObjectClass objectClass, Uid uid, OperationOptions options) {
+        Name nameHint = uid.getNameHint();
+        if (nameHint != null) {
+            return nameHint;
+        }
+
+        // Fallback
+        // If uid doesn't have Name hint, find the user by uid(sub)
+        UserType user = findUserByUid(uid.getUidValue(), options);
+        if (user == null) {
+            LOGGER.warn("Not found user when updating or deleting. uid: {0}", uid);
+            throw new UnknownUidException(uid, objectClass);
+        }
+        return new Name(user.getUsername());
+    }
+
+    private UserType findUserByUid(String uid, OperationOptions operationOptions) {
         ListUsersResult result = client.listUsers(new ListUsersRequest()
                 .withUserPoolId(configuration.getUserPoolID())
                 .withFilter(SUB_FILTER.toFilterString(uid)));
 
-        int status = result.getSdkHttpMetadata().getHttpStatusCode();
-        if (status != 200) {
-            throw new ConnectorException(String.format("Failed to get user by sub. ListUsers returned %d status. uid: %s", status, uid));
+        checkCognitoResult(result, "ListUsers");
+
+        // ListUsers returns empty users list if no hits
+        List<UserType> users = result.getUsers();
+        if (users.isEmpty()) {
+            return null;
+        }
+
+        if (users.size() > 1) {
+            throw new ConnectorException(String.format("Unexpected error. ListUsers returns multiple users when searching by sub = \"%s\"", uid));
         }
 
         return result.getUsers().get(0);
     }
 
-    public void getUserByName(Map<String, AttributeInfo> schema, String username, ResultsHandler resultsHandler, OperationOptions operationOptions) {
-        AdminGetUserResult result = client.adminGetUser(new AdminGetUserRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withUsername(username));
-
-        int status = result.getSdkHttpMetadata().getHttpStatusCode();
-        if (status != 200) {
-            throw new ConnectorException(String.format("Failed to get user by username. AdminGetUser returned %d status. username: %s", status, username));
+    public void getUsers(Map<String, AttributeInfo> schema, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
+        if (filter != null && filter.isByName()) {
+            getUserByName(schema, filter.attributeValue, resultsHandler, options);
+            return;
         }
 
-        resultsHandler.handle(toConnectorObject(schema, result));
-    }
-
-    public void getUsers(Map<String, AttributeInfo> schema, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
         ListUsersRequest request = new ListUsersRequest();
         request.setUserPoolId(configuration.getUserPoolID());
         if (filter != null) {
@@ -300,6 +328,16 @@ public class CognitoUserHandler {
             paginationToken = result.getPaginationToken();
 
         } while (paginationToken != null);
+    }
+
+    private void getUserByName(Map<String, AttributeInfo> schema, String username, ResultsHandler resultsHandler, OperationOptions operationOptions) {
+        AdminGetUserResult result = client.adminGetUser(new AdminGetUserRequest()
+                .withUserPoolId(configuration.getUserPoolID())
+                .withUsername(username));
+
+        checkCognitoResult(result, "AdminGetUser");
+
+        resultsHandler.handle(toConnectorObject(schema, result));
     }
 
     private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, AdminGetUserResult result) {
@@ -328,16 +366,23 @@ public class CognitoUserHandler {
                 builder.setUid(a.getValue());
             } else {
                 AttributeInfo attributeInfo = schema.get(escapeName(a.getName()));
-                builder.addAttribute(toAttribute(attributeInfo, a));
+                builder.addAttribute(toConnectorAttribute(attributeInfo, a));
             }
         }
 
         return builder.build();
     }
 
-    private Attribute toAttribute(AttributeInfo attributeInfo, AttributeType a) {
+    private Attribute toConnectorAttribute(AttributeInfo attributeInfo, AttributeType a) {
+        // Cognito API returns the attribute as string even if it's other types.
+        // We need to check the type from the schema and convert it.
+        // Also, we must escape the name for custom attributes (The name of custom attribute starts with "custom:").
         if (attributeInfo.getType() == Integer.class) {
             return AttributeBuilder.build(escapeName(a.getName()), Integer.parseInt(a.getValue()));
+        }
+        if (attributeInfo.getType() == ZonedDateTime.class) {
+            // The format is YYYY-MM-DD
+            return AttributeBuilder.build(escapeName(a.getName()), toZoneDateTime(a.getValue()));
         }
         if (attributeInfo.getType() == Boolean.class) {
             return AttributeBuilder.build(escapeName(a.getName()), Boolean.parseBoolean(a.getValue()));
@@ -347,3 +392,4 @@ public class CognitoUserHandler {
         return AttributeBuilder.build(escapeName(a.getName()), a.getValue());
     }
 }
+

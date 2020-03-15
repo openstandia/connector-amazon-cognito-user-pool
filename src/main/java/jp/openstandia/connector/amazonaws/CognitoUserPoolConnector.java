@@ -35,7 +35,6 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     private AWSCognitoIdentityProvider client;
 
     private static Map<String, AttributeInfo> userSchemaMap;
-    private static Map<String, AttributeInfo> groupSchemaMap;
 
     @Override
     public Configuration getConfiguration() {
@@ -124,16 +123,18 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
         userSchemaMap = new HashMap<>();
         userSchemaInfo.getAttributeInfo().stream()
                 .forEach(a -> userSchemaMap.put(a.getName(), a));
-        userSchemaMap.put("__UID__", AttributeInfoBuilder.define("username").build());
+        userSchemaMap.put(Uid.NAME, AttributeInfoBuilder.define("username").build());
         userSchemaMap = Collections.unmodifiableMap(userSchemaMap);
 
-        groupSchemaMap = new HashMap<>();
-        groupSchemaInfo.getAttributeInfo().stream()
-                .forEach(a -> groupSchemaMap.put(a.getName(), a));
-        groupSchemaMap.put("__UID__",  AttributeInfoBuilder.define("GroupName").build());
-        groupSchemaMap = Collections.unmodifiableMap(groupSchemaMap);
-
         return schemaBuilder.build();
+    }
+
+    private Map<String, AttributeInfo> getUserSchemaMap() {
+        // Load schema map if it's not loaded yet
+        if (userSchemaMap == null) {
+            schema();
+        }
+        return userSchemaMap;
     }
 
     @Override
@@ -154,7 +155,7 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
 
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
             CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-            return usersHandler.createUser(createAttributes);
+            return usersHandler.createUser(getUserSchemaMap(), createAttributes);
 
         } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
             CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
@@ -178,7 +179,7 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
 
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
             CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-            return usersHandler.updateUser(objectClass, uid, replaceAttributes, operationOptions);
+            return usersHandler.updateUser(getUserSchemaMap(), objectClass, uid, replaceAttributes, operationOptions);
 
         } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
             CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
@@ -210,27 +211,13 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
 
     @Override
     public void executeQuery(ObjectClass objectClass, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions operationOptions) {
-        // Load schema maps if they aren't loaded yet
-        if (userSchemaMap == null || groupSchemaMap == null) {
-            schema();
-        }
-
         if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
             CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-            if (filter != null && filter.isByName()) {
-                usersHandler.getUserByName(userSchemaMap, filter.attributeValue, resultsHandler, operationOptions);
-            } else {
-                usersHandler.getUsers(userSchemaMap, filter, resultsHandler, operationOptions);
-            }
+            usersHandler.getUsers(getUserSchemaMap(), filter, resultsHandler, operationOptions);
 
         } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
             CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
-            groupsHandler.getGroups(groupSchemaMap, filter, resultsHandler, operationOptions);
-            if (filter != null && filter.isByName()) {
-                groupsHandler.getGroupByName(filter.attributeValue, resultsHandler, operationOptions);
-            } else {
-                groupsHandler.getGroups(groupSchemaMap, filter, resultsHandler, operationOptions);
-            }
+            groupsHandler.getGroups(filter, resultsHandler, operationOptions);
 
         } else {
             throw new UnsupportedOperationException("Unsupported object class " + objectClass);
