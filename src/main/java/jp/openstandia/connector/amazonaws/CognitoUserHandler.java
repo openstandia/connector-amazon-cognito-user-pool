@@ -18,7 +18,6 @@ public class CognitoUserHandler {
 
     private static final Log LOGGER = Log.getLog(CognitoUserHandler.class);
 
-
     // The username for the user. Must be unique within the user pool.
     // Must be a UTF-8 string between 1 and 128 characters. After the user is created, the username cannot be changed.
     // https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminCreateUser.html
@@ -74,6 +73,9 @@ public class CognitoUserHandler {
             usernameBuilder.setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE);
         }
         builder.addAttributeInfo(usernameBuilder.build());
+
+        // __ENABLE__ attribute
+        builder.addAttributeInfo(OperationalAttributeInfos.ENABLE);
 
         // Other attributes
         List<AttributeInfo> attrInfoList = userPoolType.getSchemaAttributes().stream()
@@ -154,9 +156,13 @@ public class CognitoUserHandler {
         AdminCreateUserRequest request = new AdminCreateUserRequest()
                 .withUserPoolId(configuration.getUserPoolID());
 
+        boolean userEnabled = true;
+
         for (Attribute a : attributes) {
             if (a.getName().equals(Name.NAME)) {
                 request.setUsername(AttributeUtil.getAsStringValue(a));
+            } else if (a.getName().equals(OperationalAttributes.ENABLE_NAME)) {
+                userEnabled = AttributeUtil.getBooleanValue(a);
             } else {
                 AttributeType attr = toCognitoAttribute(schema, a);
                 request = request.withUserAttributes(attr);
@@ -174,6 +180,17 @@ public class CognitoUserHandler {
         checkCognitoResult(result, "AdminCreateUser");
 
         UserType user = result.getUser();
+        Uid newUid = new Uid(user.getAttributes().stream()
+                .filter(a -> a.getName().equals(ATTR_SUB)).findFirst().get().getValue(), user.getUsername());
+
+        // We need to call another API to enable/disable user.
+        // It means that we can't execute this operation as a single transaction.
+        // Therefore, Cognito data may be inconsistent if below calling is failed.
+        // Although this connector don't handle this situation, IDM can retry the update to resolve this inconsistency.
+        if (!userEnabled) {
+            disableUser(newUid, newUid.getNameHint());
+        }
+
         return new Uid(user.getAttributes().stream().filter(a -> a.getName().equals(ATTR_SUB)).findFirst().get().getValue());
     }
 
@@ -199,10 +216,14 @@ public class CognitoUserHandler {
         Collection<AttributeType> updateAttrs = new ArrayList<>();
 //        Collection<String> deleteAttrs = new ArrayList<>();
 
+        Boolean userEnabled = null;
+
         for (Attribute attr : replaceAttributes) {
             // When the IDM decided to delete the attribute, the value is null
             if (attr.getValue() == null) {
                 updateAttrs.add(toCognitoAttributeForDelete(attr));
+            } else if (attr.getName().equals(OperationalAttributes.ENABLE_NAME)) {
+                userEnabled = AttributeUtil.getBooleanValue(attr);
             } else {
                 updateAttrs.add(toCognitoAttribute(schema, attr));
             }
@@ -237,7 +258,51 @@ public class CognitoUserHandler {
 //            checkCognitoResult(result, "AdminDeleteUserAttributes");
 //        }
 
+        // We need to call another API to enable/disable user.
+        // It means that we can't execute this update as a single transaction.
+        // Therefore, Cognito data may be inconsistent if below calling is failed.
+        // Although this connector don't handle this situation, IDM can retry the update to resolve this inconsistency.
+        enableOrDisableUser(uid, name, userEnabled);
+
         return uid;
+    }
+
+    private void enableOrDisableUser(Uid uid, Name name, Boolean userEnabled) {
+        if (userEnabled != null) {
+            if (userEnabled) {
+                enableUser(uid, name);
+            } else {
+                disableUser(uid, name);
+            }
+        }
+    }
+
+    private void enableUser(Uid uid, Name name) {
+        AdminEnableUserRequest request = new AdminEnableUserRequest()
+                .withUserPoolId(configuration.getUserPoolID())
+                .withUsername(name.getNameValue());
+        try {
+            AdminEnableUserResult result = client.adminEnableUser(request);
+
+            checkCognitoResult(result, "AdminEnableUser");
+        } catch (UserNotFoundException e) {
+            LOGGER.warn("Not found user when enabling. uid: {0}", uid);
+            throw new UnknownUidException(uid, ObjectClass.ACCOUNT);
+        }
+    }
+
+    private void disableUser(Uid uid, Name name) {
+        AdminDisableUserRequest request = new AdminDisableUserRequest()
+                .withUserPoolId(configuration.getUserPoolID())
+                .withUsername(name.getNameValue());
+        try {
+            AdminDisableUserResult result = client.adminDisableUser(request);
+
+            checkCognitoResult(result, "AdminDisableUser");
+        } catch (UserNotFoundException e) {
+            LOGGER.warn("Not found user when disabling. uid: {0}", uid);
+            throw new UnknownUidException(uid, ObjectClass.ACCOUNT);
+        }
     }
 
     /**
