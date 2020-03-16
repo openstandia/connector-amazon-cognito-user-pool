@@ -1,11 +1,12 @@
 package jp.openstandia.connector.amazonaws;
 
-import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
-import com.amazonaws.services.cognitoidp.model.*;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
 import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
+import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
+import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListGroupsIterable;
 
 import java.time.ZonedDateTime;
 import java.util.List;
@@ -34,10 +35,10 @@ public class CognitoGroupHandler {
     private static final String ATTR_USERS = "users";
 
     private final CognitoUserPoolConfiguration configuration;
-    private final AWSCognitoIdentityProvider client;
+    private final CognitoIdentityProviderClient client;
     private final CognitoUserGroupHandler userGroupHandler;
 
-    public CognitoGroupHandler(CognitoUserPoolConfiguration configuration, AWSCognitoIdentityProvider client) {
+    public CognitoGroupHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
         this.configuration = configuration;
         this.client = client;
         this.userGroupHandler = new CognitoUserGroupHandler(configuration, client);
@@ -114,26 +115,25 @@ public class CognitoGroupHandler {
             throw new InvalidAttributeValueException("attributes not provided or empty");
         }
 
-        CreateGroupRequest request = new CreateGroupRequest()
-                .withUserPoolId(configuration.getUserPoolID());
+        CreateGroupRequest.Builder request = CreateGroupRequest.builder()
+                .userPoolId(configuration.getUserPoolID());
 
         List<Object> users = null;
-        ;
 
         for (Attribute a : attributes) {
             switch (a.getName()) {
                 case "__UID__":
                 case "__NAME__":
-                    request.setGroupName(AttributeUtil.getAsStringValue(a));
+                    request.groupName(AttributeUtil.getAsStringValue(a));
                     break;
                 case ATTR_DESCRIPTION:
-                    request.setDescription(AttributeUtil.getAsStringValue(a));
+                    request.description(AttributeUtil.getAsStringValue(a));
                     break;
                 case ATTR_PRECEDENCE:
-                    request.setPrecedence(AttributeUtil.getIntegerValue(a));
+                    request.precedence(AttributeUtil.getIntegerValue(a));
                     break;
                 case ATTR_ROLE_ARN:
-                    request.setRoleArn(AttributeUtil.getAsStringValue(a));
+                    request.roleArn(AttributeUtil.getAsStringValue(a));
                     break;
                 case ATTR_USERS:
                     users = a.getValue();
@@ -141,12 +141,12 @@ public class CognitoGroupHandler {
             }
         }
 
-        CreateGroupResult result = client.createGroup(request);
+        CreateGroupResponse result = client.createGroup(request.build());
 
         checkCognitoResult(result, "CreateGroup");
 
-        GroupType group = result.getGroup();
-        Uid newUid = new Uid(group.getGroupName(), group.getGroupName());
+        GroupType group = result.group();
+        Uid newUid = new Uid(group.groupName(), group.groupName());
 
         // We need to call another API to add/remove user for this group.
         // It means that we can't execute this update as a single transaction.
@@ -172,22 +172,22 @@ public class CognitoGroupHandler {
             throw new InvalidAttributeValueException("uid not provided");
         }
 
-        UpdateGroupRequest request = new UpdateGroupRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withGroupName(uid.getUidValue());
+        UpdateGroupRequest.Builder request = UpdateGroupRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .groupName(uid.getUidValue());
 
         List<Object> users = null;
 
         for (Attribute a : replaceAttributes) {
             switch (a.getName()) {
                 case ATTR_DESCRIPTION:
-                    request.setDescription(AttributeUtil.getAsStringValue(a));
+                    request.description(AttributeUtil.getAsStringValue(a));
                     break;
                 case ATTR_PRECEDENCE:
-                    request.setPrecedence(AttributeUtil.getIntegerValue(a));
+                    request.precedence(AttributeUtil.getIntegerValue(a));
                     break;
                 case ATTR_ROLE_ARN:
-                    request.setRoleArn(AttributeUtil.getAsStringValue(a));
+                    request.roleArn(AttributeUtil.getAsStringValue(a));
                     break;
                 case ATTR_USERS:
                     users = a.getValue();
@@ -196,7 +196,7 @@ public class CognitoGroupHandler {
         }
 
         try {
-            UpdateGroupResult result = client.updateGroup(request);
+            UpdateGroupResponse result = client.updateGroup(request.build());
 
             checkCognitoResult(result, "UpdateGroup");
         } catch (ResourceNotFoundException e) {
@@ -230,9 +230,9 @@ public class CognitoGroupHandler {
         try {
             userGroupHandler.removeAllUsers(uid.getUidValue());
 
-            DeleteGroupResult result = client.deleteGroup(new DeleteGroupRequest()
-                    .withUserPoolId(configuration.getUserPoolID())
-                    .withGroupName(uid.getUidValue()));
+            DeleteGroupResponse result = client.deleteGroup(DeleteGroupRequest.builder()
+                    .userPoolId(configuration.getUserPoolID())
+                    .groupName(uid.getUidValue()).build());
 
             checkCognitoResult(result, "DeleteGroup");
         } catch (ResourceNotFoundException e) {
@@ -258,35 +258,23 @@ public class CognitoGroupHandler {
 
         // Cannot filter using Cognito API unfortunately...
         // So we always return all groups here.
-        ListGroupsRequest request = new ListGroupsRequest();
-        request.setUserPoolId(configuration.getUserPoolID());
+        ListGroupsRequest.Builder request = ListGroupsRequest.builder();
+        request.userPoolId(configuration.getUserPoolID());
 
-        String nextToken = null;
+        ListGroupsIterable result = client.listGroupsPaginator(request.build());
 
-        do {
-            request.setNextToken(nextToken);
-
-            ListGroupsResult result = client.listGroups(request);
-
-            result.getGroups().stream()
-                    .forEach(u -> {
-                        resultsHandler.handle(toConnectorObject(u, options));
-                    });
-
-            nextToken = result.getNextToken();
-
-        } while (nextToken != null);
+        result.forEach(r -> r.groups().forEach(g -> resultsHandler.handle(toConnectorObject(g, options))));
     }
 
     private void getGroupByName(String groupName,
                                 ResultsHandler resultsHandler, OperationOptions options) {
-        GetGroupResult result = client.getGroup(new GetGroupRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withGroupName(groupName));
+        GetGroupResponse result = client.getGroup(GetGroupRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .groupName(groupName).build());
 
         checkCognitoResult(result, "GetGroup");
 
-        resultsHandler.handle(toConnectorObject(result.getGroup(), options));
+        resultsHandler.handle(toConnectorObject(result.group(), options));
     }
 
     private ConnectorObject toConnectorObject(GroupType g, OperationOptions options) {
@@ -297,23 +285,23 @@ public class CognitoGroupHandler {
 
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
                 .setObjectClass(ObjectClass.GROUP)
-                .setUid(g.getGroupName())
-                .setName(g.getGroupName());
+                .setUid(g.groupName())
+                .setName(g.groupName());
 
         for (String getAttr : attributesToGet) {
             switch (getAttr) {
                 case ATTR_DESCRIPTION:
-                    builder.addAttribute(ATTR_DESCRIPTION, g.getDescription());
+                    builder.addAttribute(ATTR_DESCRIPTION, g.description());
                 case ATTR_PRECEDENCE:
-                    builder.addAttribute(ATTR_PRECEDENCE, g.getPrecedence());
+                    builder.addAttribute(ATTR_PRECEDENCE, g.precedence());
                 case ATTR_ROLE_ARN:
-                    builder.addAttribute(ATTR_ROLE_ARN, g.getRoleArn());
+                    builder.addAttribute(ATTR_ROLE_ARN, g.roleArn());
                 case ATTR_CREATION_DATE:
-                    builder.addAttribute(ATTR_CREATION_DATE, toZoneDateTime(g.getCreationDate()));
+                    builder.addAttribute(ATTR_CREATION_DATE, toZoneDateTime(g.creationDate()));
                 case ATTR_LAST_MODIFIED_DATE:
-                    builder.addAttribute(ATTR_LAST_MODIFIED_DATE, toZoneDateTime(g.getLastModifiedDate()));
+                    builder.addAttribute(ATTR_LAST_MODIFIED_DATE, toZoneDateTime(g.lastModifiedDate()));
                 case ATTR_USERS:
-                    builder.addAttribute(ATTR_USERS, userGroupHandler.getUsersInGroup(g.getGroupName()));
+                    builder.addAttribute(ATTR_USERS, userGroupHandler.getUsersInGroup(g.groupName()));
             }
         }
 
@@ -323,13 +311,13 @@ public class CognitoGroupHandler {
     private ConnectorObject toConnectorObject(GroupType g) {
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
                 .setObjectClass(ObjectClass.GROUP)
-                .setUid(new Uid(g.getGroupName(), g.getGroupName()))
-                .setName(g.getGroupName())
-                .addAttribute(ATTR_DESCRIPTION, g.getDescription())
-                .addAttribute(ATTR_PRECEDENCE, g.getPrecedence())
-                .addAttribute(ATTR_ROLE_ARN, g.getRoleArn())
-                .addAttribute(ATTR_CREATION_DATE, toZoneDateTime(g.getCreationDate()))
-                .addAttribute(ATTR_LAST_MODIFIED_DATE, toZoneDateTime(g.getLastModifiedDate()));
+                .setUid(new Uid(g.groupName(), g.groupName()))
+                .setName(g.groupName())
+                .addAttribute(ATTR_DESCRIPTION, g.description())
+                .addAttribute(ATTR_PRECEDENCE, g.precedence())
+                .addAttribute(ATTR_ROLE_ARN, g.roleArn())
+                .addAttribute(ATTR_CREATION_DATE, toZoneDateTime(g.creationDate()))
+                .addAttribute(ATTR_LAST_MODIFIED_DATE, toZoneDateTime(g.lastModifiedDate()));
 
         return builder.build();
     }

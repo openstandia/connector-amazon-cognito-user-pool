@@ -1,12 +1,5 @@
 package jp.openstandia.connector.amazonaws;
 
-import com.amazonaws.ClientConfiguration;
-import com.amazonaws.Protocol;
-import com.amazonaws.auth.*;
-import com.amazonaws.regions.Regions;
-import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
-import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProviderClientBuilder;
-import com.amazonaws.services.cognitoidp.model.*;
 import org.identityconnectors.common.StringUtil;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.exceptions.ConfigurationException;
@@ -18,22 +11,32 @@ import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
 import org.identityconnectors.framework.spi.Connector;
 import org.identityconnectors.framework.spi.ConnectorClass;
+import org.identityconnectors.framework.spi.InstanceNameAware;
 import org.identityconnectors.framework.spi.operations.*;
+import software.amazon.awssdk.auth.credentials.*;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.http.apache.ProxyConfiguration;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
+import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClientBuilder;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
 
+import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
 @ConnectorClass(configurationClass = CognitoUserPoolConfiguration.class, displayNameKey = "NRI OpenStandia Amazon Cognito User Pool Connector")
-public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter> {
+public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
 
     private static final Log LOG = Log.getLog(CognitoUserPoolConnector.class);
 
     private CognitoUserPoolConfiguration configuration;
-    private AWSCognitoIdentityProvider client;
+    private CognitoIdentityProviderClient client;
 
     private static Map<String, AttributeInfo> userSchemaMap;
+    private String instanceName;
 
     @Override
     public Configuration getConfiguration() {
@@ -49,60 +52,58 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     }
 
     private void authenticateResource() {
-        final AWSCredentialsProvider[] cp = {new DefaultAWSCredentialsProviderChain()};
+        final AwsCredentialsProvider[] cp = {DefaultCredentialsProvider.create()};
         if (configuration.getAWSAccessKeyID() != null && configuration.getAWSSecretAccessKey() != null) {
             configuration.getAWSAccessKeyID().access(c -> {
                 configuration.getAWSSecretAccessKey().access(s -> {
-                    AWSCredentials cred = new BasicAWSCredentials(String.valueOf(c), String.valueOf(s));
-                    cp[0] = new AWSStaticCredentialsProvider(cred);
+                    AwsCredentials cred = AwsBasicCredentials.create(String.valueOf(c), String.valueOf(s));
+                    cp[0] = StaticCredentialsProvider.create(cred);
                 });
             });
         }
 
-        AWSCognitoIdentityProviderClientBuilder builder = AWSCognitoIdentityProviderClientBuilder.standard()
-                .withCredentials(cp[0]);
+        CognitoIdentityProviderClientBuilder builder = CognitoIdentityProviderClient.builder().credentialsProvider(cp[0]);
 
         String defaultRegion = configuration.getDefaultRegion();
         if (StringUtil.isNotEmpty(defaultRegion)) {
             try {
-                Regions region = Regions.fromName(defaultRegion);
-                builder.setRegion(region.getName());
+                Region region = Region.of(defaultRegion);
+                builder.region(region);
             } catch (IllegalArgumentException e) {
                 LOG.error(e, "Invalid default region: {0}", defaultRegion);
                 throw new ConfigurationException("Invalid default region: " + defaultRegion);
             }
         }
 
-        ClientConfiguration clientConfiguration = new ClientConfiguration();
-        if (StringUtil.isNotEmpty(configuration.getHttpProxyHost())) {
-            clientConfiguration.setProxyProtocol(Protocol.HTTP);
-            clientConfiguration.setProxyHost(configuration.getHttpProxyHost());
-            clientConfiguration.setProxyPort(configuration.getHttpProxyPort());
-            if (StringUtil.isNotEmpty(configuration.getHttpProxyUser())) {
-                clientConfiguration.setProxyUsername(configuration.getHttpProxyUser());
-                if (configuration.getHttpProxyPassword() != null) {
-                    configuration.getHttpProxyPassword().access(c -> {
-                        clientConfiguration.setProxyPassword(String.valueOf(c));
-                    });
-                }
-            }
-        }
-        builder.setClientConfiguration(clientConfiguration);
+        ApacheHttpClient.Builder httpClientBuilder = ApacheHttpClient.builder();
 
-        client = builder.build();
+        if (StringUtil.isNotEmpty(configuration.getHttpProxyHost())) {
+            ProxyConfiguration.Builder proxyBuilder = ProxyConfiguration.builder()
+                    .endpoint(URI.create(String.format("http://%s:%d",
+                            configuration.getHttpProxyHost(), configuration.getHttpProxyPort())));
+            if (StringUtil.isNotEmpty(configuration.getHttpProxyUser()) && configuration.getHttpProxyPassword() != null) {
+                configuration.getHttpProxyPassword().access(c -> {
+                    proxyBuilder.username(configuration.getHttpProxyUser())
+                            .password(String.valueOf(c));
+                });
+            }
+            httpClientBuilder.proxyConfiguration(proxyBuilder.build());
+        }
+
+        client = builder.httpClientBuilder(httpClientBuilder).build();
 
         // Verify we can access the user pool
         describeUserPool();
     }
 
     private UserPoolType describeUserPool() {
-        DescribeUserPoolResult result = client.describeUserPool(new DescribeUserPoolRequest()
-                .withUserPoolId(configuration.getUserPoolID()));
-        int status = result.getSdkHttpMetadata().getHttpStatusCode();
+        DescribeUserPoolResponse result = client.describeUserPool(DescribeUserPoolRequest.builder()
+                .userPoolId(configuration.getUserPoolID()).build());
+        int status = result.sdkHttpResponse().statusCode();
         if (status != 200) {
             throw new ConnectorException("Failed to describe user pool: " + configuration.getUserPoolID());
         }
-        return result.getUserPool();
+        return result.userPool();
     }
 
     @Override
@@ -236,5 +237,10 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     public void test() {
         dispose();
         authenticateResource();
+    }
+
+    @Override
+    public void setInstanceName(String instanceName) {
+        this.instanceName = instanceName;
     }
 }

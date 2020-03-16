@@ -1,11 +1,11 @@
 package jp.openstandia.connector.amazonaws;
 
-import com.amazonaws.regions.Regions;
 import org.identityconnectors.common.StringUtil;
 import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.framework.common.exceptions.ConfigurationException;
 import org.identityconnectors.framework.spi.AbstractConfiguration;
 import org.identityconnectors.framework.spi.ConfigurationProperty;
+import software.amazon.awssdk.regions.Region;
 
 public class CognitoUserPoolConfiguration extends AbstractConfiguration {
 
@@ -138,7 +138,7 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
     public void validate() {
         if (StringUtil.isNotEmpty(getDefaultRegion())) {
             try {
-                Regions.fromName(getDefaultRegion());
+                Region.of(getDefaultRegion());
             } catch (IllegalArgumentException e) {
                 throw new ConfigurationException("Invalid AWS Region name: " + getDefaultRegion());
             }

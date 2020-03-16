@@ -1,12 +1,16 @@
 package jp.openstandia.connector.amazonaws;
 
-import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
-import com.amazonaws.services.cognitoidp.model.*;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.objects.Name;
 import org.identityconnectors.framework.common.objects.Uid;
+import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
+import software.amazon.awssdk.services.cognitoidentityprovider.paginators.AdminListGroupsForUserIterable;
+import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListUsersInGroupIterable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static jp.openstandia.connector.amazonaws.CognitoUtils.checkCognitoResult;
@@ -16,9 +20,9 @@ public class CognitoUserGroupHandler {
     private static final Log LOGGER = Log.getLog(CognitoUserHandler.class);
 
     private final CognitoUserPoolConfiguration configuration;
-    private final AWSCognitoIdentityProvider client;
+    private final CognitoIdentityProviderClient client;
 
-    public CognitoUserGroupHandler(CognitoUserPoolConfiguration configuration, AWSCognitoIdentityProvider client) {
+    public CognitoUserGroupHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
         this.configuration = configuration;
         this.client = client;
     }
@@ -33,8 +37,8 @@ public class CognitoUserGroupHandler {
                 .collect(Collectors.toSet());
 
         getGroups(name.getNameValue(), g -> {
-            if(!addGroupsSet.remove(g.getGroupName())) {
-                removeUserFromGroup(name.getNameValue(), g.getGroupName());
+            if (!addGroupsSet.remove(g.groupName())) {
+                removeUserFromGroup(name.getNameValue(), g.groupName());
             }
         });
 
@@ -52,8 +56,8 @@ public class CognitoUserGroupHandler {
                 .collect(Collectors.toSet());
 
         getUsers(groupUid.getUidValue(), u -> {
-            if(!addUsersSet.remove(u.getUsername())) {
-                removeUserFromGroup(u.getUsername(), groupUid.getUidValue());
+            if (!addUsersSet.remove(u.username())) {
+                removeUserFromGroup(u.username(), groupUid.getUidValue());
             }
         });
 
@@ -62,35 +66,35 @@ public class CognitoUserGroupHandler {
     }
 
     private void addUserToGroup(String username, String groupName) {
-        AdminAddUserToGroupRequest request = new AdminAddUserToGroupRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withUsername(username)
-                .withGroupName(groupName);
+        AdminAddUserToGroupRequest.Builder request = AdminAddUserToGroupRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .username(username)
+                .groupName(groupName);
 
-        AdminAddUserToGroupResult result = client.adminAddUserToGroup(request);
+        AdminAddUserToGroupResponse result = client.adminAddUserToGroup(request.build());
 
         checkCognitoResult(result, "AdminAddUserToGroup");
     }
 
     private void removeUserFromGroup(String username, String groupName) {
-        AdminRemoveUserFromGroupRequest request = new AdminRemoveUserFromGroupRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withUsername(username)
-                .withGroupName(groupName);
+        AdminRemoveUserFromGroupRequest.Builder request = AdminRemoveUserFromGroupRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .username(username)
+                .groupName(groupName);
 
-        AdminRemoveUserFromGroupResult result = client.adminRemoveUserFromGroup(request);
+        AdminRemoveUserFromGroupResponse result = client.adminRemoveUserFromGroup(request.build());
 
         checkCognitoResult(result, "AdminRemoveUserFromGroup");
     }
 
     public void removeAllUsers(String groupName) {
-        getUsers(groupName, u -> removeUserFromGroup(u.getUsername(), groupName));
+        getUsers(groupName, u -> removeUserFromGroup(u.username(), groupName));
     }
 
     public List<String> getUsersInGroup(String groupName) {
         List<String> users = new ArrayList<>();
         getUsers(groupName, u -> {
-           users.add(u.getUsername());
+            users.add(u.username());
         });
         return users;
     }
@@ -99,30 +103,20 @@ public class CognitoUserGroupHandler {
         void handle(UserType user);
     }
 
-     void getUsers(String groupName, UserHandler handler) {
-        ListUsersInGroupRequest request = new ListUsersInGroupRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withGroupName(groupName);
+    void getUsers(String groupName, UserHandler handler) {
+        ListUsersInGroupRequest.Builder request = ListUsersInGroupRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .groupName(groupName);
 
-        String nextToken = null;
+        ListUsersInGroupIterable result = client.listUsersInGroupPaginator(request.build());
 
-        do {
-            request.setNextToken(nextToken);
-
-            ListUsersInGroupResult result = client.listUsersInGroup(request);
-
-            result.getUsers().stream()
-                    .forEach(u -> handler.handle(u));
-
-            nextToken = result.getNextToken();
-
-        } while (nextToken != null);
+        result.forEach(r -> r.users().stream().forEach(u -> handler.handle(u)));
     }
 
     public List<String> getGroupsForUser(String username) {
         List<String> groups = new ArrayList<>();
         getGroups(username, g -> {
-            groups.add(g.getGroupName());
+            groups.add(g.groupName());
         });
         return groups;
     }
@@ -132,22 +126,12 @@ public class CognitoUserGroupHandler {
     }
 
     private void getGroups(String userName, GroupHandler handler) {
-        AdminListGroupsForUserRequest request = new AdminListGroupsForUserRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withUsername(userName);
+        AdminListGroupsForUserRequest.Builder request = AdminListGroupsForUserRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .username(userName);
 
-        String nextToken = null;
+        AdminListGroupsForUserIterable result = client.adminListGroupsForUserPaginator(request.build());
 
-        do {
-            request.setNextToken(nextToken);
-
-            AdminListGroupsForUserResult result = client.adminListGroupsForUser(request);
-
-            result.getGroups().stream()
-                    .forEach(u -> handler.handle(u));
-
-            nextToken = result.getNextToken();
-
-        } while (nextToken != null);
+        result.forEach(r -> r.groups().stream().forEach(g -> handler.handle(g)));
     }
 }

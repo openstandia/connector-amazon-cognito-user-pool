@@ -1,25 +1,23 @@
 package jp.openstandia.connector.amazonaws;
 
-import com.amazonaws.AmazonWebServiceResult;
-import com.amazonaws.services.cognitoidp.model.AttributeType;
 import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
 import org.identityconnectors.framework.common.objects.Attribute;
 import org.identityconnectors.framework.common.objects.AttributeInfo;
 import org.identityconnectors.framework.common.objects.AttributeUtil;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.AttributeType;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.CognitoIdentityProviderResponse;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Date;
 import java.util.Map;
 
 public class CognitoUtils {
 
-    public static ZonedDateTime toZoneDateTime(Date d) {
-        Instant instant = d.toInstant();
+    public static ZonedDateTime toZoneDateTime(Instant instant) {
         ZoneId zone = ZoneId.systemDefault();
         return ZonedDateTime.ofInstant(instant, zone);
     }
@@ -30,9 +28,10 @@ public class CognitoUtils {
     }
 
     public static AttributeType toCognitoAttribute(Map<String, AttributeInfo> schema, Attribute attr) {
-        return new AttributeType()
-                .withName(unescapeName(attr.getName()))
-                .withValue(toCognitoValue(schema, attr));
+        return AttributeType.builder()
+                .name(unescapeName(attr.getName()))
+                .value(toCognitoValue(schema, attr))
+                .build();
     }
 
     private static String toCognitoValue(Map<String, AttributeInfo> schema, Attribute attr) {
@@ -59,9 +58,10 @@ public class CognitoUtils {
 
     public static AttributeType toCognitoAttributeForDelete(Attribute attr) {
         // Cognito deletes the attribute when updating the value with ""
-        return new AttributeType()
-                .withName(unescapeName(attr.getName()))
-                .withValue("");
+        return AttributeType.builder()
+                .name(unescapeName(attr.getName()))
+                .value("")
+                .build();
     }
 
     /**
@@ -93,8 +93,8 @@ public class CognitoUtils {
      * @param result
      * @param apiName
      */
-    public static void checkCognitoResult(AmazonWebServiceResult result, String apiName) {
-        int status = result.getSdkHttpMetadata().getHttpStatusCode();
+    public static void checkCognitoResult(CognitoIdentityProviderResponse result, String apiName) {
+        int status = result.sdkHttpResponse().statusCode();
         if (status != 200) {
             throw new ConnectorException(String.format("Cognito returns unexpected error when calling \"%s\". status: %d", apiName, status));
         }

@@ -1,13 +1,15 @@
 package jp.openstandia.connector.amazonaws;
 
-import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
-import com.amazonaws.services.cognitoidp.model.*;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
 import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
+import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
+import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListUsersIterable;
 
+import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -42,10 +44,10 @@ public class CognitoUserHandler {
     private static final CognitoUserPoolFilter.SubFilter SUB_FILTER = new CognitoUserPoolFilter.SubFilter();
 
     private final CognitoUserPoolConfiguration configuration;
-    private final AWSCognitoIdentityProvider client;
+    private final CognitoIdentityProviderClient client;
     private final CognitoUserGroupHandler userGroupHandler;
 
-    public CognitoUserHandler(CognitoUserPoolConfiguration configuration, AWSCognitoIdentityProvider client) {
+    public CognitoUserHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
         this.configuration = configuration;
         this.client = client;
         this.userGroupHandler = new CognitoUserGroupHandler(configuration, client);
@@ -73,7 +75,7 @@ public class CognitoUserHandler {
                 .setCreateable(true)
                 .setUpdateable(false)
                 .setNativeName(ATTR_USERNAME);
-        Boolean caseSensitive = userPoolType.getUsernameConfiguration().isCaseSensitive();
+        Boolean caseSensitive = userPoolType.usernameConfiguration().caseSensitive();
         if (!caseSensitive) {
             usernameBuilder.setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE);
         }
@@ -83,32 +85,32 @@ public class CognitoUserHandler {
         builder.addAttributeInfo(OperationalAttributeInfos.ENABLE);
 
         // Other attributes
-        List<AttributeInfo> attrInfoList = userPoolType.getSchemaAttributes().stream()
-                .filter(a -> !a.getName().equals(ATTR_SUB))
+        List<AttributeInfo> attrInfoList = userPoolType.schemaAttributes().stream()
+                .filter(a -> !a.name().equals(ATTR_SUB))
                 .map(s -> {
-                    AttributeInfoBuilder attrInfo = AttributeInfoBuilder.define(escapeName(s.getName()));
-                    attrInfo.setRequired(s.isRequired());
-                    attrInfo.setUpdateable(s.isMutable());
+                    AttributeInfoBuilder attrInfo = AttributeInfoBuilder.define(escapeName(s.name()));
+                    attrInfo.setRequired(s.required());
+                    attrInfo.setUpdateable(s.mutable());
 
                     // https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SchemaAttributeType.html#CognitoUserPools-Type-SchemaAttributeType-AttributeDataType
-                    switch (s.getAttributeDataType()) {
-                        case "String":
+                    switch (s.attributeDataType()) {
+                        case STRING:
                             attrInfo.setType(String.class);
                             break;
-                        case "Number":
+                        case NUMBER:
                             attrInfo.setType(Integer.class);
                             break;
-                        case "DateTime":
+                        case DATE_TIME:
                             attrInfo.setType(ZonedDateTime.class);
                             break;
-                        case "Boolean":
+                        case BOOLEAN:
                             attrInfo.setType(Boolean.class);
                             break;
                         default:
                             attrInfo.setType(String.class);
                     }
 
-                    if (s.getName().equals(ATTR_EMAIL) || s.getName().equals(ATTR_PREFERRED_USERNAME)) {
+                    if (s.name().equals(ATTR_EMAIL) || s.name().equals(ATTR_PREFERRED_USERNAME)) {
                         if (!caseSensitive) {
                             attrInfo.setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE);
                         }
@@ -166,38 +168,38 @@ public class CognitoUserHandler {
             throw new InvalidAttributeValueException("attributes not provided or empty");
         }
 
-        AdminCreateUserRequest request = new AdminCreateUserRequest()
-                .withUserPoolId(configuration.getUserPoolID());
+        AdminCreateUserRequest.Builder request = AdminCreateUserRequest.builder()
+                .userPoolId(configuration.getUserPoolID());
 
         boolean userEnabled = true;
         List<Object> groups = null;
 
         for (Attribute a : attributes) {
             if (a.getName().equals(Name.NAME)) {
-                request.setUsername(AttributeUtil.getAsStringValue(a));
+                request.username(AttributeUtil.getAsStringValue(a));
             } else if (a.getName().equals(OperationalAttributes.ENABLE_NAME)) {
                 userEnabled = AttributeUtil.getBooleanValue(a);
             } else if (a.getName().equals(ATTR_GROUPS)) {
                 groups = a.getValue();
             } else {
                 AttributeType attr = toCognitoAttribute(schema, a);
-                request = request.withUserAttributes(attr);
+                request = request.userAttributes(attr);
             }
         }
 
         // Generate username if IDM doesn't have mapping to username
-        if (request.getUsername() == null) {
+        if (request.build().username() == null) {
             String uuid = UUID.randomUUID().toString();
-            request.setUsername(uuid);
+            request.username(uuid);
         }
 
-        AdminCreateUserResult result = client.adminCreateUser(request);
+        AdminCreateUserResponse result = client.adminCreateUser(request.build());
 
         checkCognitoResult(result, "AdminCreateUser");
 
-        UserType user = result.getUser();
-        Uid newUid = new Uid(user.getAttributes().stream()
-                .filter(a -> a.getName().equals(ATTR_SUB)).findFirst().get().getValue(), user.getUsername());
+        UserType user = result.user();
+        Uid newUid = new Uid(user.attributes().stream()
+                .filter(a -> a.name().equals(ATTR_SUB)).findFirst().get().value(), user.username());
 
         // We need to call another API to enable/disable user.
         // It means that we can't execute this operation as a single transaction.
@@ -255,12 +257,12 @@ public class CognitoUserHandler {
         }
 
         if (updateAttrs.size() > 0) {
-            AdminUpdateUserAttributesRequest request = new AdminUpdateUserAttributesRequest()
-                    .withUserPoolId(configuration.getUserPoolID())
-                    .withUsername(name.getNameValue())
-                    .withUserAttributes(updateAttrs);
+            AdminUpdateUserAttributesRequest.Builder request = AdminUpdateUserAttributesRequest.builder()
+                    .userPoolId(configuration.getUserPoolID())
+                    .username(name.getNameValue())
+                    .userAttributes(updateAttrs);
             try {
-                AdminUpdateUserAttributesResult result = client.adminUpdateUserAttributes(request);
+                AdminUpdateUserAttributesResponse result = client.adminUpdateUserAttributes(request.build());
 
                 checkCognitoResult(result, "AdminUpdateUserAttributes");
             } catch (UserNotFoundException e) {
@@ -309,11 +311,11 @@ public class CognitoUserHandler {
     }
 
     private void enableUser(Uid uid, Name name) {
-        AdminEnableUserRequest request = new AdminEnableUserRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withUsername(name.getNameValue());
+        AdminEnableUserRequest.Builder request = AdminEnableUserRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .username(name.getNameValue());
         try {
-            AdminEnableUserResult result = client.adminEnableUser(request);
+            AdminEnableUserResponse result = client.adminEnableUser(request.build());
 
             checkCognitoResult(result, "AdminEnableUser");
         } catch (UserNotFoundException e) {
@@ -323,11 +325,11 @@ public class CognitoUserHandler {
     }
 
     private void disableUser(Uid uid, Name name) {
-        AdminDisableUserRequest request = new AdminDisableUserRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withUsername(name.getNameValue());
+        AdminDisableUserRequest.Builder request = AdminDisableUserRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .username(name.getNameValue());
         try {
-            AdminDisableUserResult result = client.adminDisableUser(request);
+            AdminDisableUserResponse result = client.adminDisableUser(request.build());
 
             checkCognitoResult(result, "AdminDisableUser");
         } catch (UserNotFoundException e) {
@@ -352,9 +354,9 @@ public class CognitoUserHandler {
         Name name = resolveName(objectClass, uid, options);
 
         try {
-            AdminDeleteUserResult result = client.adminDeleteUser(new AdminDeleteUserRequest()
-                    .withUserPoolId(configuration.getUserPoolID())
-                    .withUsername(name.getNameValue()));
+            AdminDeleteUserResponse result = client.adminDeleteUser(AdminDeleteUserRequest.builder()
+                    .userPoolId(configuration.getUserPoolID())
+                    .username(name.getNameValue()).build());
 
             checkCognitoResult(result, "AdminDeleteUser");
         } catch (UserNotFoundException e) {
@@ -376,18 +378,18 @@ public class CognitoUserHandler {
             LOGGER.warn("Not found user when updating or deleting. uid: {0}", uid);
             throw new UnknownUidException(uid, objectClass);
         }
-        return new Name(user.getUsername());
+        return new Name(user.username());
     }
 
     private UserType findUserByUid(String uid) {
-        ListUsersResult result = client.listUsers(new ListUsersRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withFilter(SUB_FILTER.toFilterString(uid)));
+        ListUsersResponse result = client.listUsers(ListUsersRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .filter(SUB_FILTER.toFilterString(uid)).build());
 
         checkCognitoResult(result, "ListUsers");
 
         // ListUsers returns empty users list if no hits
-        List<UserType> users = result.getUsers();
+        List<UserType> users = result.users();
         if (users.isEmpty()) {
             return null;
         }
@@ -396,13 +398,13 @@ public class CognitoUserHandler {
             throw new ConnectorException(String.format("Unexpected error. ListUsers returns multiple users when searching by sub = \"%s\"", uid));
         }
 
-        return result.getUsers().get(0);
+        return result.users().get(0);
     }
 
-    private AdminGetUserResult findUserByName(String username) {
-        AdminGetUserResult result = client.adminGetUser(new AdminGetUserRequest()
-                .withUserPoolId(configuration.getUserPoolID())
-                .withUsername(username));
+    private AdminGetUserResponse findUserByName(String username) {
+        AdminGetUserResponse result = client.adminGetUser(AdminGetUserRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .username(username).build());
 
         checkCognitoResult(result, "AdminGetUser");
 
@@ -415,31 +417,21 @@ public class CognitoUserHandler {
             return;
         }
 
-        ListUsersRequest request = new ListUsersRequest();
-        request.setUserPoolId(configuration.getUserPoolID());
+        ListUsersRequest.Builder request = ListUsersRequest.builder();
+        request.userPoolId(configuration.getUserPoolID());
         if (filter != null) {
-            request.setFilter(filter.toFilterString(schema));
+            request.filter(filter.toFilterString(schema));
         }
 
-        String paginationToken = null;
+        ListUsersIterable result = client.listUsersPaginator(request.build());
 
-        do {
-            request.setPaginationToken(paginationToken);
-
-            ListUsersResult result = client.listUsers(request);
-
-            result.getUsers().stream()
-                    .forEach(u -> resultsHandler.handle(toConnectorObject(schema, u, options)));
-
-            paginationToken = result.getPaginationToken();
-
-        } while (paginationToken != null);
+        result.forEach(r -> r.users().forEach(u -> resultsHandler.handle(toConnectorObject(schema, u, options))));
     }
 
     private void getUserByName(Map<String, AttributeInfo> schema, String username, ResultsHandler resultsHandler, OperationOptions options) {
         String[] attributesToGet = options.getAttributesToGet();
         if (attributesToGet == null) {
-            AdminGetUserResult result = findUserByName(username);
+            AdminGetUserResponse result = findUserByName(username);
             resultsHandler.handle(toConnectorObject(schema, result, options));
             return;
         }
@@ -461,18 +453,18 @@ public class CognitoUserHandler {
         }
 
         if (loadFull) {
-            AdminGetUserResult result = findUserByName(username);
+            AdminGetUserResponse result = findUserByName(username);
 
-            builder.addAttribute(AttributeBuilder.buildEnabled(result.getEnabled()))
-                    .addAttribute(ATTR_USER_CREATE_DATE, CognitoUtils.toZoneDateTime(result.getUserCreateDate()))
-                    .addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUtils.toZoneDateTime(result.getUserLastModifiedDate()))
-                    .addAttribute(ATTR_USER_STATUS, result.getUserStatus());
+            builder.addAttribute(AttributeBuilder.buildEnabled(result.enabled()))
+                    .addAttribute(ATTR_USER_CREATE_DATE, CognitoUtils.toZoneDateTime(result.userCreateDate()))
+                    .addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUtils.toZoneDateTime(result.userLastModifiedDate()))
+                    .addAttribute(ATTR_USER_STATUS, result.userStatusAsString());
 
-            for (AttributeType a : result.getUserAttributes()) {
-                if (a.getName().equals(ATTR_SUB)) {
-                    builder.setUid(a.getValue());
+            for (AttributeType a : result.userAttributes()) {
+                if (a.name().equals(ATTR_SUB)) {
+                    builder.setUid(a.value());
                 } else {
-                    AttributeInfo attributeInfo = schema.get(escapeName(a.getName()));
+                    AttributeInfo attributeInfo = schema.get(escapeName(a.name()));
                     builder.addAttribute(toConnectorAttribute(attributeInfo, a));
                 }
             }
@@ -481,18 +473,18 @@ public class CognitoUserHandler {
         resultsHandler.handle(builder.build());
     }
 
-    private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, AdminGetUserResult result, OperationOptions options) {
-        return toConnectorObject(schema, result.getUsername(), result.getEnabled(), result.getUserCreateDate(), result.getUserLastModifiedDate(),
-                result.getUserStatus(), result.getUserAttributes(), options);
+    private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, AdminGetUserResponse result, OperationOptions options) {
+        return toConnectorObject(schema, result.username(), result.enabled(), result.userCreateDate(), result.userLastModifiedDate(),
+                result.userStatusAsString(), result.userAttributes(), options);
     }
 
     private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, UserType u, OperationOptions options) {
-        return toConnectorObject(schema, u.getUsername(), u.getEnabled(), u.getUserCreateDate(), u.getUserLastModifiedDate(),
-                u.getUserStatus(), u.getAttributes(), options);
+        return toConnectorObject(schema, u.username(), u.enabled(), u.userCreateDate(), u.userLastModifiedDate(),
+                u.userStatusAsString(), u.attributes(), options);
     }
 
     private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, String username, boolean enabled,
-                                              Date userCreateDate, Date userLastModifiedDate,
+                                              Instant userCreateDate, Instant userLastModifiedDate,
                                               String status, List<AttributeType> attributes, OperationOptions options) {
         final ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
                 .setName(username)
@@ -503,10 +495,10 @@ public class CognitoUserHandler {
                 .addAttribute(ATTR_USER_STATUS, status);
 
         for (AttributeType a : attributes) {
-            if (a.getName().equals(ATTR_SUB)) {
-                builder.setUid(a.getValue());
+            if (a.name().equals(ATTR_SUB)) {
+                builder.setUid(a.value());
             } else {
-                AttributeInfo attributeInfo = schema.get(escapeName(a.getName()));
+                AttributeInfo attributeInfo = schema.get(escapeName(a.name()));
                 builder.addAttribute(toConnectorAttribute(attributeInfo, a));
             }
         }
@@ -528,18 +520,18 @@ public class CognitoUserHandler {
         // We need to check the type from the schema and convert it.
         // Also, we must escape the name for custom attributes (The name of custom attribute starts with "custom:").
         if (attributeInfo.getType() == Integer.class) {
-            return AttributeBuilder.build(escapeName(a.getName()), Integer.parseInt(a.getValue()));
+            return AttributeBuilder.build(escapeName(a.name()), Integer.parseInt(a.value()));
         }
         if (attributeInfo.getType() == ZonedDateTime.class) {
             // The format is YYYY-MM-DD
-            return AttributeBuilder.build(escapeName(a.getName()), toZoneDateTime(a.getValue()));
+            return AttributeBuilder.build(escapeName(a.name()), toZoneDateTime(a.value()));
         }
         if (attributeInfo.getType() == Boolean.class) {
-            return AttributeBuilder.build(escapeName(a.getName()), Boolean.parseBoolean(a.getValue()));
+            return AttributeBuilder.build(escapeName(a.name()), Boolean.parseBoolean(a.value()));
         }
 
         // String
-        return AttributeBuilder.build(escapeName(a.getName()), a.getValue());
+        return AttributeBuilder.build(escapeName(a.name()), a.value());
     }
 }
 
