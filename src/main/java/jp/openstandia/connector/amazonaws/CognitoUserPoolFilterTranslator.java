@@ -1,10 +1,7 @@
 package jp.openstandia.connector.amazonaws;
 
 import org.identityconnectors.common.logging.Log;
-import org.identityconnectors.framework.common.objects.Attribute;
-import org.identityconnectors.framework.common.objects.AttributeUtil;
-import org.identityconnectors.framework.common.objects.Name;
-import org.identityconnectors.framework.common.objects.Uid;
+import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.AbstractFilterTranslator;
 import org.identityconnectors.framework.common.objects.filter.EqualsFilter;
 import org.identityconnectors.framework.common.objects.filter.StartsWithFilter;
@@ -12,6 +9,14 @@ import org.identityconnectors.framework.common.objects.filter.StartsWithFilter;
 public class CognitoUserPoolFilterTranslator extends AbstractFilterTranslator<CognitoUserPoolFilter> {
 
     private static final Log LOG = Log.getLog(CognitoUserPoolFilterTranslator.class);
+
+    private final OperationOptions options;
+    private final ObjectClass objectClass;
+
+    public CognitoUserPoolFilterTranslator(ObjectClass objectClass, OperationOptions options) {
+        this.objectClass = objectClass;
+        this.options = options;
+    }
 
     @Override
     protected CognitoUserPoolFilter createEqualsExpression(EqualsFilter filter, boolean not) {

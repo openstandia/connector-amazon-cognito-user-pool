@@ -138,11 +138,6 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
     }
 
     @Override
-    public void dispose() {
-        this.client = null;
-    }
-
-    @Override
     public Uid create(ObjectClass objectClass, Set<Attribute> createAttributes, OperationOptions options) {
         if (objectClass == null) {
             throw new InvalidAttributeValueException("ObjectClass value not provided");
@@ -206,7 +201,7 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
 
     @Override
     public FilterTranslator<CognitoUserPoolFilter> createFilterTranslator(ObjectClass objectClass, OperationOptions options) {
-        return new CognitoUserPoolFilterTranslator();
+        return new CognitoUserPoolFilterTranslator(objectClass, options);
     }
 
     @Override
@@ -216,8 +211,8 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
                 CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
                 usersHandler.getUsers(getUserSchemaMap(), filter, resultsHandler, options);
             } catch (UserNotFoundException e) {
-                // TODO: fix attributeValue. Currently it isn't uid...
-                throw new UnknownUidException(new Uid(filter.attributeValue), objectClass);
+                // Don't throw UnknownUidException
+                return;
             }
 
         } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
@@ -225,7 +220,8 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
                 CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
                 groupsHandler.getGroups(filter, resultsHandler, options);
             } catch (ResourceNotFoundException e) {
-                throw new UnknownUidException(new Uid(filter.attributeValue), objectClass);
+                // Don't throw UnknownUidException
+                return;
             }
 
         } else {
@@ -237,6 +233,12 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
     public void test() {
         dispose();
         authenticateResource();
+    }
+
+    @Override
+    public void dispose() {
+        client.close();
+        this.client = null;
     }
 
     @Override
