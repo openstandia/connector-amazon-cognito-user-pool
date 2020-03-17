@@ -2,6 +2,7 @@ package jp.openstandia.connector.amazonaws;
 
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
+import org.identityconnectors.framework.common.exceptions.RetryableException;
 import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
@@ -12,8 +13,7 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Set;
 
-import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.checkCognitoResult;
-import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.toZoneDateTime;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.*;
 
 public class CognitoUserPoolGroupHandler {
 
@@ -112,24 +112,7 @@ public class CognitoUserPoolGroupHandler {
         List<Object> users = null;
 
         for (Attribute a : attributes) {
-            switch (a.getName()) {
-                case "__UID__":
-                case "__NAME__":
-                    request.groupName(AttributeUtil.getAsStringValue(a));
-                    break;
-                case ATTR_DESCRIPTION:
-                    request.description(AttributeUtil.getAsStringValue(a));
-                    break;
-                case ATTR_PRECEDENCE:
-                    request.precedence(AttributeUtil.getIntegerValue(a));
-                    break;
-                case ATTR_ROLE_ARN:
-                    request.roleArn(AttributeUtil.getAsStringValue(a));
-                    break;
-                case ATTR_USERS:
-                    users = a.getValue();
-                    break;
-            }
+            users = buildCreateRequest(request, a);
         }
 
         CreateGroupResponse result = client.createGroup(request.build());
@@ -169,38 +152,105 @@ public class CognitoUserPoolGroupHandler {
         List<Object> users = null;
 
         for (Attribute a : replaceAttributes) {
-            switch (a.getName()) {
-                case ATTR_DESCRIPTION:
-                    request.description(AttributeUtil.getAsStringValue(a));
-                    break;
-                case ATTR_PRECEDENCE:
-                    request.precedence(AttributeUtil.getIntegerValue(a));
-                    break;
-                case ATTR_ROLE_ARN:
-                    request.roleArn(AttributeUtil.getAsStringValue(a));
-                    break;
-                case ATTR_USERS:
-                    users = a.getValue();
-                    break;
+            if (a.getValue() == null) {
+                users = buildDeleteValue(request, a);
+            } else {
+                users = buildReplaceValue(request, a);
             }
         }
+        UpdateGroupRequest req = request.build();
 
-        try {
-            UpdateGroupResponse result = client.updateGroup(request.build());
+        if (req.description() != null ||
+                req.precedence() != null ||
+                req.roleArn() != null) {
+            try {
+                UpdateGroupResponse result = client.updateGroup(req);
 
-            checkCognitoResult(result, "UpdateGroup");
-        } catch (ResourceNotFoundException e) {
-            LOGGER.warn("Not found group when updating. uid: {0}", uid);
-            throw new UnknownUidException(uid, GROUP_OBJECT_CLASS);
+                checkCognitoResult(result, "UpdateGroup");
+            } catch (ResourceNotFoundException e) {
+                LOGGER.warn("Not found group when updating. uid: {0}", uid);
+                throw new UnknownUidException(uid, GROUP_OBJECT_CLASS);
+            }
         }
 
         // We need to call another API to add/remove user for this group.
         // It means that we can't execute this update as a single transaction.
         // Therefore, Cognito data may be inconsistent if below calling is failed.
         // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
-        userGroupHandler.updateUsersToGroup(uid, users);
+        try {
+            userGroupHandler.updateUsersToGroup(uid, users);
+        } catch (ResourceNotFoundException e) {
+            LOGGER.warn(e, "Not found group when updating. uid: {0}", uid);
+            throw new UnknownUidException(uid, GROUP_OBJECT_CLASS);
+        } catch (UserNotFoundException e) {
+            LOGGER.warn(e, "Not found the user when updating. uid: {0}, users: {1}", uid, users);
+            throw RetryableException.wrap("Need to retry because the user was deleted", e);
+        }
 
         return uid;
+    }
+
+    private List<Object> buildCreateRequest(CreateGroupRequest.Builder request, Attribute a) {
+        List<Object> users = null;
+        switch (a.getName()) {
+            case "__UID__":
+            case "__NAME__":
+                request.groupName(AttributeUtil.getAsStringValue(a));
+            case ATTR_DESCRIPTION:
+                request.description(AttributeUtil.getAsStringValue(a));
+                break;
+            case ATTR_PRECEDENCE:
+                request.precedence(AttributeUtil.getIntegerValue(a));
+                break;
+            case ATTR_ROLE_ARN:
+                request.roleArn(AttributeUtil.getAsStringValue(a));
+                break;
+            case ATTR_USERS:
+                users = a.getValue();
+                break;
+        }
+        return users;
+    }
+
+    private List<Object> buildReplaceValue(UpdateGroupRequest.Builder request, Attribute a) {
+        List<Object> users = null;
+        switch (a.getName()) {
+            case ATTR_DESCRIPTION:
+                request.description(AttributeUtil.getAsStringValue(a));
+                break;
+            case ATTR_PRECEDENCE:
+                request.precedence(AttributeUtil.getIntegerValue(a));
+                break;
+            case ATTR_ROLE_ARN:
+                request.roleArn(AttributeUtil.getAsStringValue(a));
+                break;
+            case ATTR_USERS:
+                users = a.getValue();
+                break;
+        }
+        return users;
+    }
+
+    private List<Object> buildDeleteValue(UpdateGroupRequest.Builder request, Attribute a) {
+        List<Object> users = null;
+        switch (a.getName()) {
+            case ATTR_DESCRIPTION:
+                // Description is removed if we set ""
+                request.description("");
+                break;
+            case ATTR_PRECEDENCE:
+                // Precedence is removed if we set 0
+                request.precedence(0);
+                break;
+            case ATTR_ROLE_ARN:
+                // RoleArn is removed if we set ""
+                request.roleArn("");
+                break;
+            case ATTR_USERS:
+                users = a.getValue();
+                break;
+        }
+        return users;
     }
 
     /**
