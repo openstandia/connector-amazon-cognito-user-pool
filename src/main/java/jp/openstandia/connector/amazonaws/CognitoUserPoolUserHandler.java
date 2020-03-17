@@ -1,3 +1,18 @@
+/*
+ *  Copyright Nomura Research Institute, Ltd.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 package jp.openstandia.connector.amazonaws;
 
 import org.identityconnectors.common.logging.Log;
@@ -489,14 +504,24 @@ public class CognitoUserPoolUserHandler {
 
         if (shouldReturnPartialAttributeValues(options)) {
             // Suppress fetching groups
+            LOGGER.ok("Suppress fetching groups because return partial attribute values is requested");
+
             AttributeBuilder ab = new AttributeBuilder();
             ab.setName(ATTR_GROUPS).setAttributeValueCompleteness(AttributeValueCompleteness.INCOMPLETE);
             ab.addValue(Collections.EMPTY_LIST);
             builder.addAttribute(ab.build());
         } else {
-            // Fetch groups
-            List<String> groups = userGroupHandler.getGroupsForUser(username);
-            builder.addAttribute(ATTR_GROUPS, groups);
+            if (attrsToGetSet == null) {
+                // Suppress fetching groups default
+                LOGGER.ok("Suppress fetching groups because returned by default is true");
+
+            } else if (shouldReturn(attrsToGetSet, ATTR_GROUPS)) {
+                // Fetch groups
+                LOGGER.ok("Fetching groups because attributes to get is requested");
+
+                List<String> groups = userGroupHandler.getGroupsForUser(username);
+                builder.addAttribute(ATTR_GROUPS, groups);
+            }
         }
 
         return builder.build();
