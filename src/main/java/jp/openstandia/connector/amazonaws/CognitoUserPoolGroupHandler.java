@@ -1,6 +1,7 @@
 package jp.openstandia.connector.amazonaws;
 
 import org.identityconnectors.common.logging.Log;
+import org.identityconnectors.framework.common.exceptions.AlreadyExistsException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
 import org.identityconnectors.framework.common.exceptions.RetryableException;
 import org.identityconnectors.framework.common.exceptions.UnknownUidException;
@@ -13,7 +14,8 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Set;
 
-import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.*;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.checkCognitoResult;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.toZoneDateTime;
 
 public class CognitoUserPoolGroupHandler {
 
@@ -100,33 +102,55 @@ public class CognitoUserPoolGroupHandler {
      *
      * @param attributes
      * @return
+     * @throws AlreadyExistsException Object with the specified _NAME_ already exists.
+     *                                Or there is a similar violation in any of the object attributes that
+     *                                cannot be distinguished from AlreadyExists situation.
      */
-    public Uid createGroup(Set<Attribute> attributes) {
+    public Uid createGroup(Set<Attribute> attributes) throws AlreadyExistsException {
         if (attributes == null || attributes.isEmpty()) {
             throw new InvalidAttributeValueException("attributes not provided or empty");
         }
 
-        CreateGroupRequest.Builder request = CreateGroupRequest.builder()
+        CreateGroupRequest.Builder builder = CreateGroupRequest.builder()
                 .userPoolId(configuration.getUserPoolID());
 
         List<Object> users = null;
 
         for (Attribute a : attributes) {
-            users = buildCreateRequest(request, a);
+            users = buildCreateRequest(builder, a);
         }
 
-        CreateGroupResponse result = client.createGroup(request.build());
+        CreateGroupRequest request = builder.build();
 
-        checkCognitoResult(result, "CreateGroup");
+        CreateGroupResponse result = null;
+        try {
+            result = client.createGroup(request);
+
+            checkCognitoResult(result, "CreateGroup");
+        } catch (GroupExistsException e) {
+            LOGGER.warn(e, "The group already exists when creating. uid: {0}", request.groupName());
+            throw new AlreadyExistsException("The group exists. GroupName: " + request.groupName(), e);
+        }
 
         GroupType group = result.group();
         Uid newUid = new Uid(group.groupName(), group.groupName());
 
-        // We need to call another API to add/remove user for this group.
-        // It means that we can't execute this update as a single transaction.
-        // Therefore, Cognito data may be inconsistent if below calling is failed.
-        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
-        userGroupHandler.updateUsersToGroup(newUid, users);
+        try {
+            // We need to call another API to add/remove user for this group.
+            // It means that we can't execute this update as a single transaction.
+            // Therefore, Cognito data may be inconsistent if below calling is failed.
+            // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
+            userGroupHandler.updateUsersToGroup(newUid, users);
+
+        } catch (ResourceNotFoundException e) {
+            LOGGER.warn(e, "The group was deleted when setting users of the group after created. GroupName: {0}", request.groupName());
+            throw RetryableException.wrap("The group was deleted when setting users of the group after created. GroupName: "
+                    + request.groupName(), e);
+        } catch (UserNotFoundException e) {
+            LOGGER.warn(e, "The user was deleted when setting users of the group after created. GroupName: {0}", request.groupName());
+            throw RetryableException.wrap("The user was deleted when setting users the group after created. GroupName: "
+                    + request.groupName(), e);
+        }
 
         return newUid;
     }
@@ -190,20 +214,20 @@ public class CognitoUserPoolGroupHandler {
         return uid;
     }
 
-    private List<Object> buildCreateRequest(CreateGroupRequest.Builder request, Attribute a) {
+    private List<Object> buildCreateRequest(CreateGroupRequest.Builder builder, Attribute a) {
         List<Object> users = null;
         switch (a.getName()) {
             case "__UID__":
             case "__NAME__":
-                request.groupName(AttributeUtil.getAsStringValue(a));
+                builder.groupName(AttributeUtil.getAsStringValue(a));
             case ATTR_DESCRIPTION:
-                request.description(AttributeUtil.getAsStringValue(a));
+                builder.description(AttributeUtil.getAsStringValue(a));
                 break;
             case ATTR_PRECEDENCE:
-                request.precedence(AttributeUtil.getIntegerValue(a));
+                builder.precedence(AttributeUtil.getIntegerValue(a));
                 break;
             case ATTR_ROLE_ARN:
-                request.roleArn(AttributeUtil.getAsStringValue(a));
+                builder.roleArn(AttributeUtil.getAsStringValue(a));
                 break;
             case ATTR_USERS:
                 users = a.getValue();
@@ -319,7 +343,7 @@ public class CognitoUserPoolGroupHandler {
     private ConnectorObject toConnectorObject(GroupType g, OperationOptions options) {
         String[] attributesToGet = options.getAttributesToGet();
         if (attributesToGet == null) {
-            return toConnectorObject(g);
+            return toFullConnectorObject(g);
         }
 
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
@@ -347,7 +371,7 @@ public class CognitoUserPoolGroupHandler {
         return builder.build();
     }
 
-    private ConnectorObject toConnectorObject(GroupType g) {
+    private ConnectorObject toFullConnectorObject(GroupType g) {
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
                 .setObjectClass(GROUP_OBJECT_CLASS)
                 .setUid(new Uid(g.groupName(), g.groupName()))
