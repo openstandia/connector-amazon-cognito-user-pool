@@ -17,6 +17,8 @@ import static jp.openstandia.connector.amazonaws.CognitoUtils.toZoneDateTime;
 
 public class CognitoGroupHandler {
 
+    public static final ObjectClass GROUP_OBJECT_CLASS = new ObjectClass("Group");
+
     private static final Log LOGGER = Log.getLog(CognitoGroupHandler.class);
 
     // Unique and unchangeable within the user pool
@@ -46,7 +48,7 @@ public class CognitoGroupHandler {
 
     public ObjectClassInfo getGroupSchema(UserPoolType userPoolType) {
         ObjectClassInfoBuilder builder = new ObjectClassInfoBuilder();
-        builder.setType(ObjectClass.GROUP_NAME);
+        builder.setType(GROUP_OBJECT_CLASS.getObjectClassValue());
 
         // __UID__
         builder.addAttributeInfo(AttributeInfoBuilder.define(Uid.NAME)
@@ -213,7 +215,6 @@ public class CognitoGroupHandler {
         return uid;
     }
 
-
     /**
      * The spec for DeleteGroup:
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_DeleteGroup.html
@@ -284,7 +285,7 @@ public class CognitoGroupHandler {
         }
 
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
-                .setObjectClass(ObjectClass.GROUP)
+                .setObjectClass(GROUP_OBJECT_CLASS)
                 .setUid(g.groupName())
                 .setName(g.groupName());
 
@@ -310,7 +311,7 @@ public class CognitoGroupHandler {
 
     private ConnectorObject toConnectorObject(GroupType g) {
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
-                .setObjectClass(ObjectClass.GROUP)
+                .setObjectClass(GROUP_OBJECT_CLASS)
                 .setUid(new Uid(g.groupName(), g.groupName()))
                 .setName(g.groupName())
                 .addAttribute(ATTR_DESCRIPTION, g.description())

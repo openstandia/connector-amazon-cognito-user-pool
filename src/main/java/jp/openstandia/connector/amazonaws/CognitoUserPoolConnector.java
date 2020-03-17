@@ -5,7 +5,6 @@ import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.exceptions.ConfigurationException;
 import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
-import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
@@ -26,6 +25,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+
+import static jp.openstandia.connector.amazonaws.CognitoGroupHandler.GROUP_OBJECT_CLASS;
+import static jp.openstandia.connector.amazonaws.CognitoUserHandler.USER_OBJECT_CLASS;
 
 @ConnectorClass(configurationClass = CognitoUserPoolConfiguration.class, displayNameKey = "NRI OpenStandia Amazon Cognito User Pool Connector")
 public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
@@ -148,11 +150,11 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
             throw new InvalidAttributeValueException("Attributes not provided or empty");
         }
 
-        if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
+        if (objectClass.equals(USER_OBJECT_CLASS)) {
             CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
             return usersHandler.createUser(getUserSchemaMap(), createAttributes);
 
-        } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
+        } else if (objectClass.equals(GROUP_OBJECT_CLASS))  {
             CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
             return groupsHandler.createGroup(createAttributes);
 
@@ -172,11 +174,11 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
             throw new InvalidAttributeValueException("Attributes not provided or empty");
         }
 
-        if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
+        if (objectClass.equals(USER_OBJECT_CLASS)) {
             CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
             return usersHandler.updateUser(getUserSchemaMap(), objectClass, uid, replaceAttributes, options);
 
-        } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
+        } else if (objectClass.equals(GROUP_OBJECT_CLASS))  {
             CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
             return groupsHandler.updateGroup(objectClass, uid, replaceAttributes, options);
         }
@@ -186,11 +188,11 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
 
     @Override
     public void delete(ObjectClass objectClass, Uid uid, OperationOptions options) {
-        if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
+        if (objectClass.equals(USER_OBJECT_CLASS)) {
             CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
             usersHandler.deleteUser(objectClass, uid, options);
 
-        } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
+        } else if (objectClass.equals(GROUP_OBJECT_CLASS))  {
             CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
             groupsHandler.deleteGroup(objectClass, uid, options);
 
@@ -206,7 +208,7 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
 
     @Override
     public void executeQuery(ObjectClass objectClass, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
-        if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
+        if (objectClass.equals(USER_OBJECT_CLASS)) {
             try {
                 CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
                 usersHandler.getUsers(getUserSchemaMap(), filter, resultsHandler, options);
@@ -215,7 +217,7 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
                 return;
             }
 
-        } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
+        } else if (objectClass.equals(GROUP_OBJECT_CLASS))  {
             try {
                 CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
                 groupsHandler.getGroups(filter, resultsHandler, options);

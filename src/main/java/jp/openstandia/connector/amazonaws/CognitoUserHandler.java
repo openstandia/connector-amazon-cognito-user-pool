@@ -18,6 +18,8 @@ import static jp.openstandia.connector.amazonaws.CognitoUtils.*;
 
 public class CognitoUserHandler {
 
+    public static final ObjectClass USER_OBJECT_CLASS = new ObjectClass("User");
+
     private static final Log LOGGER = Log.getLog(CognitoUserHandler.class);
 
     // The username for the user. Must be unique within the user pool.
@@ -57,6 +59,7 @@ public class CognitoUserHandler {
         LOGGER.ok("UserPoolType: {0}", userPoolType);
 
         ObjectClassInfoBuilder builder = new ObjectClassInfoBuilder();
+        builder.setType(USER_OBJECT_CLASS.getObjectClassValue());
 
         // sub (__UID__)
         builder.addAttributeInfo(
@@ -320,7 +323,7 @@ public class CognitoUserHandler {
             checkCognitoResult(result, "AdminEnableUser");
         } catch (UserNotFoundException e) {
             LOGGER.warn("Not found user when enabling. uid: {0}", uid);
-            throw new UnknownUidException(uid, ObjectClass.ACCOUNT);
+            throw new UnknownUidException(uid, USER_OBJECT_CLASS);
         }
     }
 
@@ -334,7 +337,7 @@ public class CognitoUserHandler {
             checkCognitoResult(result, "AdminDisableUser");
         } catch (UserNotFoundException e) {
             LOGGER.warn("Not found user when disabling. uid: {0}", uid);
-            throw new UnknownUidException(uid, ObjectClass.ACCOUNT);
+            throw new UnknownUidException(uid, USER_OBJECT_CLASS);
         }
     }
 
