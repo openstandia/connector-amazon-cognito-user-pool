@@ -46,24 +46,20 @@ public class CognitoUserPoolGroupHandler {
         this.userGroupHandler = new CognitoUserPoolAssociationHandler(configuration, client);
     }
 
-    public ObjectClassInfo getGroupSchema(UserPoolType userPoolType) {
+    public static ObjectClassInfo getGroupSchema(UserPoolType userPoolType) {
         ObjectClassInfoBuilder builder = new ObjectClassInfoBuilder();
         builder.setType(GROUP_OBJECT_CLASS.getObjectClassValue());
 
         // __UID__
         builder.addAttributeInfo(AttributeInfoBuilder.define(Uid.NAME)
                 .setRequired(true)
-                .setCreateable(true)
                 .setUpdateable(false)
-                .setReturnedByDefault(true)
                 .setNativeName(ATTR_GROUP_NAME)
                 .build());
         // __NAME__
         builder.addAttributeInfo(AttributeInfoBuilder.define(Name.NAME)
                 .setRequired(true)
-                .setCreateable(true)
                 .setUpdateable(false)
-                .setReturnedByDefault(true)
                 .setNativeName(ATTR_GROUP_NAME)
                 .build());
 
@@ -71,31 +67,24 @@ public class CognitoUserPoolGroupHandler {
                 .setType(ZonedDateTime.class)
                 .setCreateable(false)
                 .setUpdateable(false)
-                .setReturnedByDefault(true)
                 .build());
         builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_LAST_MODIFIED_DATE)
                 .setType(ZonedDateTime.class)
                 .setCreateable(false)
                 .setUpdateable(false)
-                .setReturnedByDefault(true)
                 .build());
         builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_DESCRIPTION)
-                .setReturnedByDefault(true)
                 .build());
         builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_PRECEDENCE)
                 .setType(Integer.class)
-                .setReturnedByDefault(true)
                 .build());
         builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_ROLE_ARN)
-                .setReturnedByDefault(true)
                 .build());
 
         // Association
         builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_USERS)
-                .setCreateable(true)
-                .setUpdateable(true)
-                .setReturnedByDefault(false)
                 .setMultiValued(true)
+                .setReturnedByDefault(false)
                 .build());
 
         ObjectClassInfo groupSchemaInfo = builder.build();
@@ -163,13 +152,12 @@ public class CognitoUserPoolGroupHandler {
      * The spec for UpdateGroup:
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_UpdateGroup.html
      *
-     * @param objectClass
      * @param uid
      * @param replaceAttributes
      * @param operationOptions
      * @return
      */
-    public Uid updateGroup(ObjectClass objectClass, Uid uid, Set<Attribute> replaceAttributes, OperationOptions operationOptions) {
+    public Uid updateGroup(Uid uid, Set<Attribute> replaceAttributes, OperationOptions operationOptions) {
         if (uid == null) {
             throw new InvalidAttributeValueException("uid not provided");
         }
@@ -203,7 +191,7 @@ public class CognitoUserPoolGroupHandler {
             checkCognitoResult(result, "UpdateGroup");
         } catch (ResourceNotFoundException e) {
             LOGGER.warn("Not found group when updating. uid: {0}", uid);
-            throw new UnknownUidException(uid, objectClass);
+            throw new UnknownUidException(uid, GROUP_OBJECT_CLASS);
         }
 
         // We need to call another API to add/remove user for this group.

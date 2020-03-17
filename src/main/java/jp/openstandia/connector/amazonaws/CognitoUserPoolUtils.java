@@ -46,7 +46,7 @@ public class CognitoUserPoolUtils {
         }
         if (attributeInfo.getType() == ZonedDateTime.class) {
             // The format must be YYYY-MM-DD in cognito
-            ZonedDateTime date = (ZonedDateTime)AttributeUtil.getSingleValue(attr);
+            ZonedDateTime date = (ZonedDateTime) AttributeUtil.getSingleValue(attr);
             return date.format(DateTimeFormatter.ISO_LOCAL_DATE);
         }
         if (attributeInfo.getType() == Boolean.class) {

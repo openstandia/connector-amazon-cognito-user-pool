@@ -48,14 +48,17 @@ public class CognitoUserPoolUserHandler {
     private final CognitoUserPoolConfiguration configuration;
     private final CognitoIdentityProviderClient client;
     private final CognitoUserPoolAssociationHandler userGroupHandler;
+    private final Map<String, AttributeInfo> schema;
 
-    public CognitoUserPoolUserHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
+    public CognitoUserPoolUserHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client,
+                                      Map<String, AttributeInfo> schema) {
         this.configuration = configuration;
         this.client = client;
+        this.schema = schema;
         this.userGroupHandler = new CognitoUserPoolAssociationHandler(configuration, client);
     }
 
-    public ObjectClassInfo getUserSchema(UserPoolType userPoolType) {
+    public static ObjectClassInfo getUserSchema(UserPoolType userPoolType) {
         LOGGER.ok("UserPoolType: {0}", userPoolType);
 
         ObjectClassInfoBuilder builder = new ObjectClassInfoBuilder();
@@ -64,7 +67,7 @@ public class CognitoUserPoolUserHandler {
         // sub (__UID__)
         builder.addAttributeInfo(
                 AttributeInfoBuilder.define(Uid.NAME)
-                        .setRequired(true)
+                        .setRequired(false) // Must be optional. It is not present for create operations
                         .setCreateable(false)
                         .setUpdateable(false)
                         .setNativeName(ATTR_SUB)
@@ -75,7 +78,6 @@ public class CognitoUserPoolUserHandler {
         // Caution!! It is prohibited to update this value which is Amazon Cognito limitation.
         AttributeInfoBuilder usernameBuilder = AttributeInfoBuilder.define(Name.NAME)
                 .setRequired(true)
-                .setCreateable(true)
                 .setUpdateable(false)
                 .setNativeName(ATTR_USERNAME);
         Boolean caseSensitive = userPoolType.usernameConfiguration().caseSensitive();
@@ -127,26 +129,21 @@ public class CognitoUserPoolUserHandler {
                 .setType(ZonedDateTime.class)
                 .setCreateable(false)
                 .setUpdateable(false)
-                .setReturnedByDefault(true)
                 .build());
         attrInfoList.add(AttributeInfoBuilder.define(ATTR_USER_LAST_MODIFIED_DATE)
                 .setType(ZonedDateTime.class)
                 .setCreateable(false)
                 .setUpdateable(false)
-                .setReturnedByDefault(true)
                 .build());
         attrInfoList.add(AttributeInfoBuilder.define(ATTR_USER_STATUS)
                 .setCreateable(false)
                 .setUpdateable(false)
-                .setReturnedByDefault(true)
                 .build());
 
         // Association
         attrInfoList.add(AttributeInfoBuilder.define(ATTR_GROUPS)
-                .setCreateable(true)
-                .setUpdateable(true)
-                .setReturnedByDefault(false)
                 .setMultiValued(true)
+                .setReturnedByDefault(false)
                 .build());
 
         builder.addAllAttributeInfo(attrInfoList);
@@ -162,11 +159,10 @@ public class CognitoUserPoolUserHandler {
      * The spec for AdminCreateUser:
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminCreateUser.html
      *
-     * @param schema
      * @param attributes
      * @return
      */
-    public Uid createUser(Map<String, AttributeInfo> schema, Set<Attribute> attributes) {
+    public Uid createUser(Set<Attribute> attributes) {
         if (attributes == null || attributes.isEmpty()) {
             throw new InvalidAttributeValueException("attributes not provided or empty");
         }
@@ -225,20 +221,17 @@ public class CognitoUserPoolUserHandler {
      * The spec for AdminUpdateUserAttributes:
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUpdateUserAttributes.html
      *
-     * @param schema
-     * @param objectClass
      * @param uid
      * @param replaceAttributes
      * @param options
      * @return
      */
-    public Uid updateUser(Map<String, AttributeInfo> schema, ObjectClass objectClass,
-                          Uid uid, Set<Attribute> replaceAttributes, OperationOptions options) {
+    public Uid updateUser(Uid uid, Set<Attribute> replaceAttributes, OperationOptions options) {
         if (uid == null) {
             throw new InvalidAttributeValueException("uid not provided");
         }
 
-        Name name = resolveName(objectClass, uid, options);
+        Name name = resolveName(uid, options);
 
         Collection<AttributeType> updateAttrs = new ArrayList<>();
 //        Collection<String> deleteAttrs = new ArrayList<>();
@@ -270,7 +263,7 @@ public class CognitoUserPoolUserHandler {
                 checkCognitoResult(result, "AdminUpdateUserAttributes");
             } catch (UserNotFoundException e) {
                 LOGGER.warn("Not found user when deleting. uid: {0}", uid);
-                throw new UnknownUidException(uid, objectClass);
+                throw new UnknownUidException(uid, USER_OBJECT_CLASS);
             }
         }
 
@@ -345,16 +338,15 @@ public class CognitoUserPoolUserHandler {
      * The spec for AdminDeleteUser:
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminDeleteUser.html
      *
-     * @param objectClass
      * @param uid
      * @param options
      */
-    public void deleteUser(ObjectClass objectClass, Uid uid, OperationOptions options) {
+    public void deleteUser(Uid uid, OperationOptions options) {
         if (uid == null) {
             throw new InvalidAttributeValueException("uid not provided");
         }
 
-        Name name = resolveName(objectClass, uid, options);
+        Name name = resolveName(uid, options);
 
         try {
             AdminDeleteUserResponse result = client.adminDeleteUser(AdminDeleteUserRequest.builder()
@@ -364,11 +356,11 @@ public class CognitoUserPoolUserHandler {
             checkCognitoResult(result, "AdminDeleteUser");
         } catch (UserNotFoundException e) {
             LOGGER.warn("Not found user when deleting. uid: {0}", uid);
-            throw new UnknownUidException(uid, objectClass);
+            throw new UnknownUidException(uid, USER_OBJECT_CLASS);
         }
     }
 
-    private Name resolveName(ObjectClass objectClass, Uid uid, OperationOptions options) {
+    private Name resolveName(Uid uid, OperationOptions options) {
         Name nameHint = uid.getNameHint();
         if (nameHint != null) {
             return nameHint;
@@ -379,7 +371,7 @@ public class CognitoUserPoolUserHandler {
         UserType user = findUserByUid(uid.getUidValue());
         if (user == null) {
             LOGGER.warn("Not found user when updating or deleting. uid: {0}", uid);
-            throw new UnknownUidException(uid, objectClass);
+            throw new UnknownUidException(uid, USER_OBJECT_CLASS);
         }
         return new Name(user.username());
     }
@@ -414,9 +406,9 @@ public class CognitoUserPoolUserHandler {
         return result;
     }
 
-    public void getUsers(Map<String, AttributeInfo> schema, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
+    public void getUsers(CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
         if (filter != null && filter.isByName()) {
-            getUserByName(schema, filter.attributeValue, resultsHandler, options);
+            getUserByName(filter.attributeValue, resultsHandler, options);
             return;
         }
 
@@ -428,14 +420,14 @@ public class CognitoUserPoolUserHandler {
 
         ListUsersIterable result = client.listUsersPaginator(request.build());
 
-        result.forEach(r -> r.users().forEach(u -> resultsHandler.handle(toConnectorObject(schema, u, options))));
+        result.forEach(r -> r.users().forEach(u -> resultsHandler.handle(toConnectorObject(u, options))));
     }
 
-    private void getUserByName(Map<String, AttributeInfo> schema, String username, ResultsHandler resultsHandler, OperationOptions options) {
+    private void getUserByName(String username, ResultsHandler resultsHandler, OperationOptions options) {
         String[] attributesToGet = options.getAttributesToGet();
         if (attributesToGet == null) {
             AdminGetUserResponse result = findUserByName(username);
-            resultsHandler.handle(toConnectorObject(schema, result, options));
+            resultsHandler.handle(toConnectorObject(result, options));
             return;
         }
 
@@ -476,17 +468,17 @@ public class CognitoUserPoolUserHandler {
         resultsHandler.handle(builder.build());
     }
 
-    private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, AdminGetUserResponse result, OperationOptions options) {
-        return toConnectorObject(schema, result.username(), result.enabled(), result.userCreateDate(), result.userLastModifiedDate(),
+    private ConnectorObject toConnectorObject(AdminGetUserResponse result, OperationOptions options) {
+        return toConnectorObject(result.username(), result.enabled(), result.userCreateDate(), result.userLastModifiedDate(),
                 result.userStatusAsString(), result.userAttributes(), options);
     }
 
-    private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, UserType u, OperationOptions options) {
-        return toConnectorObject(schema, u.username(), u.enabled(), u.userCreateDate(), u.userLastModifiedDate(),
+    private ConnectorObject toConnectorObject(UserType u, OperationOptions options) {
+        return toConnectorObject(u.username(), u.enabled(), u.userCreateDate(), u.userLastModifiedDate(),
                 u.userStatusAsString(), u.attributes(), options);
     }
 
-    private ConnectorObject toConnectorObject(Map<String, AttributeInfo> schema, String username, boolean enabled,
+    private ConnectorObject toConnectorObject(String username, boolean enabled,
                                               Instant userCreateDate, Instant userLastModifiedDate,
                                               String status, List<AttributeType> attributes, OperationOptions options) {
         final ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
