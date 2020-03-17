@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.*;
 
@@ -418,54 +419,15 @@ public class CognitoUserPoolUserHandler {
             request.filter(filter.toFilterString(schema));
         }
 
+        // TODO: filter attributes natively
         ListUsersIterable result = client.listUsersPaginator(request.build());
 
         result.forEach(r -> r.users().forEach(u -> resultsHandler.handle(toConnectorObject(u, options))));
     }
 
     private void getUserByName(String username, ResultsHandler resultsHandler, OperationOptions options) {
-        String[] attributesToGet = options.getAttributesToGet();
-        if (attributesToGet == null) {
-            AdminGetUserResponse result = findUserByName(username);
-            resultsHandler.handle(toConnectorObject(result, options));
-            return;
-        }
-
-        final ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
-                .setName(username);
-
-        boolean loadFull = false;
-        for (String getAttr : attributesToGet) {
-            switch (getAttr) {
-                case ATTR_GROUPS:
-                    if (options.getAllowPartialAttributeValues() != Boolean.TRUE) {
-                        List<String> groups = userGroupHandler.getGroupsForUser(username);
-                        builder.addAttribute(ATTR_GROUPS, groups);
-                    }
-                default:
-                    loadFull = true;
-            }
-        }
-
-        if (loadFull) {
-            AdminGetUserResponse result = findUserByName(username);
-
-            builder.addAttribute(AttributeBuilder.buildEnabled(result.enabled()))
-                    .addAttribute(ATTR_USER_CREATE_DATE, CognitoUserPoolUtils.toZoneDateTime(result.userCreateDate()))
-                    .addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUserPoolUtils.toZoneDateTime(result.userLastModifiedDate()))
-                    .addAttribute(ATTR_USER_STATUS, result.userStatusAsString());
-
-            for (AttributeType a : result.userAttributes()) {
-                if (a.name().equals(ATTR_SUB)) {
-                    builder.setUid(a.value());
-                } else {
-                    AttributeInfo attributeInfo = schema.get(escapeName(a.name()));
-                    builder.addAttribute(toConnectorAttribute(attributeInfo, a));
-                }
-            }
-        }
-
-        resultsHandler.handle(builder.build());
+        AdminGetUserResponse result = findUserByName(username);
+        resultsHandler.handle(toConnectorObject(result, options));
     }
 
     private ConnectorObject toConnectorObject(AdminGetUserResponse result, OperationOptions options) {
@@ -478,55 +440,66 @@ public class CognitoUserPoolUserHandler {
                 u.userStatusAsString(), u.attributes(), options);
     }
 
+    private boolean shouldReturn(Set<String> attrsToGetSet, String attr) {
+        if (attrsToGetSet == null) {
+            return true;
+        }
+        return attrsToGetSet.contains(attr);
+    }
+
     private ConnectorObject toConnectorObject(String username, boolean enabled,
                                               Instant userCreateDate, Instant userLastModifiedDate,
                                               String status, List<AttributeType> attributes, OperationOptions options) {
+
+        String[] attributesToGet = options.getAttributesToGet();
+        Set<String> attrsToGetSet = null;
+        if (attributesToGet != null) {
+            attrsToGetSet = Stream.of(attributesToGet).collect(Collectors.toSet());
+        }
+
         final ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
-                .setName(username)
-                // Metadata
-                .addAttribute(AttributeBuilder.buildEnabled(enabled))
-                .addAttribute(ATTR_USER_CREATE_DATE, CognitoUserPoolUtils.toZoneDateTime(userCreateDate))
-                .addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUserPoolUtils.toZoneDateTime(userLastModifiedDate))
-                .addAttribute(ATTR_USER_STATUS, status);
+                // Always returns "username"
+                .setName(username);
+
+        // Metadata
+        if (shouldReturn(attrsToGetSet, OperationalAttributes.ENABLE_NAME)) {
+            builder.addAttribute(AttributeBuilder.buildEnabled(enabled));
+        }
+        if (shouldReturn(attrsToGetSet, ATTR_USER_CREATE_DATE)) {
+            builder.addAttribute(ATTR_USER_CREATE_DATE, CognitoUserPoolUtils.toZoneDateTime(userCreateDate));
+        }
+        if (shouldReturn(attrsToGetSet, ATTR_USER_LAST_MODIFIED_DATE)) {
+            builder.addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUserPoolUtils.toZoneDateTime(userLastModifiedDate));
+        }
+        if (shouldReturn(attrsToGetSet, ATTR_USER_STATUS)) {
+            builder.addAttribute(ATTR_USER_STATUS, status);
+        }
 
         for (AttributeType a : attributes) {
+            // Always returns "sub"
             if (a.name().equals(ATTR_SUB)) {
                 builder.setUid(a.value());
             } else {
                 AttributeInfo attributeInfo = schema.get(escapeName(a.name()));
-                builder.addAttribute(toConnectorAttribute(attributeInfo, a));
+                if (shouldReturn(attrsToGetSet, attributeInfo.getName())) {
+                    builder.addAttribute(toConnectorAttribute(attributeInfo, a));
+                }
             }
         }
 
-        if (options.getAllowPartialAttributeValues() != Boolean.TRUE) {
-            List<String> groups = userGroupHandler.getGroupsForUser(username);
-            builder.addAttribute(ATTR_GROUPS, groups);
-        } else {
+        if (shouldReturnPartialAttributeValues(options)) {
+            // Suppress fetching groups
             AttributeBuilder ab = new AttributeBuilder();
             ab.setName(ATTR_GROUPS).setAttributeValueCompleteness(AttributeValueCompleteness.INCOMPLETE);
+            ab.addValue(Collections.EMPTY_LIST);
             builder.addAttribute(ab.build());
+        } else {
+            // Fetch groups
+            List<String> groups = userGroupHandler.getGroupsForUser(username);
+            builder.addAttribute(ATTR_GROUPS, groups);
         }
 
         return builder.build();
-    }
-
-    private Attribute toConnectorAttribute(AttributeInfo attributeInfo, AttributeType a) {
-        // Cognito API returns the attribute as string even if it's other types.
-        // We need to check the type from the schema and convert it.
-        // Also, we must escape the name for custom attributes (The name of custom attribute starts with "custom:").
-        if (attributeInfo.getType() == Integer.class) {
-            return AttributeBuilder.build(escapeName(a.name()), Integer.parseInt(a.value()));
-        }
-        if (attributeInfo.getType() == ZonedDateTime.class) {
-            // The format is YYYY-MM-DD
-            return AttributeBuilder.build(escapeName(a.name()), toZoneDateTime(a.value()));
-        }
-        if (attributeInfo.getType() == Boolean.class) {
-            return AttributeBuilder.build(escapeName(a.name()), Boolean.parseBoolean(a.value()));
-        }
-
-        // String
-        return AttributeBuilder.build(escapeName(a.name()), a.value());
     }
 }
 

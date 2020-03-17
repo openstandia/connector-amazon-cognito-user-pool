@@ -2,9 +2,7 @@ package jp.openstandia.connector.amazonaws;
 
 import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
-import org.identityconnectors.framework.common.objects.Attribute;
-import org.identityconnectors.framework.common.objects.AttributeInfo;
-import org.identityconnectors.framework.common.objects.AttributeUtil;
+import org.identityconnectors.framework.common.objects.*;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AttributeType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.CognitoIdentityProviderResponse;
 
@@ -15,6 +13,11 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
+/**
+ * Provides utility methods
+ *
+ * @author Hiroyuki Wada
+ */
 public class CognitoUserPoolUtils {
 
     public static ZonedDateTime toZoneDateTime(Instant instant) {
@@ -27,6 +30,39 @@ public class CognitoUserPoolUtils {
         return date.atStartOfDay(ZoneId.systemDefault());
     }
 
+    /**
+     * Transform a Cognito attribute object to a Connector attribute object.
+     *
+     * @param attributeInfo
+     * @param a
+     * @return
+     */
+    public static Attribute toConnectorAttribute(AttributeInfo attributeInfo, AttributeType a) {
+        // Cognito API returns the attribute as string even if it's other types.
+        // We need to check the type from the schema and convert it.
+        // Also, we must escape the name for custom attributes (The name of custom attribute starts with "custom:").
+        if (attributeInfo.getType() == Integer.class) {
+            return AttributeBuilder.build(escapeName(a.name()), Integer.parseInt(a.value()));
+        }
+        if (attributeInfo.getType() == ZonedDateTime.class) {
+            // The format is YYYY-MM-DD
+            return AttributeBuilder.build(escapeName(a.name()), toZoneDateTime(a.value()));
+        }
+        if (attributeInfo.getType() == Boolean.class) {
+            return AttributeBuilder.build(escapeName(a.name()), Boolean.parseBoolean(a.value()));
+        }
+
+        // String
+        return AttributeBuilder.build(escapeName(a.name()), a.value());
+    }
+
+    /**
+     * Transform a Connector attribute object to a Cognito attribute object.
+     *
+     * @param schema
+     * @param attr
+     * @return
+     */
     public static AttributeType toCognitoAttribute(Map<String, AttributeInfo> schema, Attribute attr) {
         return AttributeType.builder()
                 .name(unescapeName(attr.getName()))
@@ -56,6 +92,12 @@ public class CognitoUserPoolUtils {
         return AttributeUtil.getAsStringValue(attr);
     }
 
+    /**
+     * Transform a Connector attribute object to a Cognito attribute object for deleting the value.
+     *
+     * @param attr
+     * @return
+     */
     public static AttributeType toCognitoAttributeForDelete(Attribute attr) {
         // Cognito deletes the attribute when updating the value with ""
         return AttributeType.builder()
@@ -98,5 +140,16 @@ public class CognitoUserPoolUtils {
         if (status != 200) {
             throw new ConnectorException(String.format("Cognito returns unexpected error when calling \"%s\". status: %d", apiName, status));
         }
+    }
+
+    /**
+     * Check if ALLOW_PARTIAL_ATTRIBUTE_VALUES == true.
+     *
+     * @param options
+     * @return
+     */
+    public static boolean shouldReturnPartialAttributeValues(OperationOptions options) {
+        // If the option isn't set from IDM, it may be null.
+        return options.getAllowPartialAttributeValues() == Boolean.TRUE;
     }
 }
