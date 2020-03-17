@@ -14,13 +14,13 @@ import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static jp.openstandia.connector.amazonaws.CognitoUtils.*;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.*;
 
-public class CognitoUserHandler {
+public class CognitoUserPoolUserHandler {
 
     public static final ObjectClass USER_OBJECT_CLASS = new ObjectClass("User");
 
-    private static final Log LOGGER = Log.getLog(CognitoUserHandler.class);
+    private static final Log LOGGER = Log.getLog(CognitoUserPoolUserHandler.class);
 
     // The username for the user. Must be unique within the user pool.
     // Must be a UTF-8 string between 1 and 128 characters. After the user is created, the username cannot be changed.
@@ -47,12 +47,12 @@ public class CognitoUserHandler {
 
     private final CognitoUserPoolConfiguration configuration;
     private final CognitoIdentityProviderClient client;
-    private final CognitoUserGroupHandler userGroupHandler;
+    private final CognitoUserPoolAssociationHandler userGroupHandler;
 
-    public CognitoUserHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
+    public CognitoUserPoolUserHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
         this.configuration = configuration;
         this.client = client;
-        this.userGroupHandler = new CognitoUserGroupHandler(configuration, client);
+        this.userGroupHandler = new CognitoUserPoolAssociationHandler(configuration, client);
     }
 
     public ObjectClassInfo getUserSchema(UserPoolType userPoolType) {
@@ -459,8 +459,8 @@ public class CognitoUserHandler {
             AdminGetUserResponse result = findUserByName(username);
 
             builder.addAttribute(AttributeBuilder.buildEnabled(result.enabled()))
-                    .addAttribute(ATTR_USER_CREATE_DATE, CognitoUtils.toZoneDateTime(result.userCreateDate()))
-                    .addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUtils.toZoneDateTime(result.userLastModifiedDate()))
+                    .addAttribute(ATTR_USER_CREATE_DATE, CognitoUserPoolUtils.toZoneDateTime(result.userCreateDate()))
+                    .addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUserPoolUtils.toZoneDateTime(result.userLastModifiedDate()))
                     .addAttribute(ATTR_USER_STATUS, result.userStatusAsString());
 
             for (AttributeType a : result.userAttributes()) {
@@ -493,8 +493,8 @@ public class CognitoUserHandler {
                 .setName(username)
                 // Metadata
                 .addAttribute(AttributeBuilder.buildEnabled(enabled))
-                .addAttribute(ATTR_USER_CREATE_DATE, CognitoUtils.toZoneDateTime(userCreateDate))
-                .addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUtils.toZoneDateTime(userLastModifiedDate))
+                .addAttribute(ATTR_USER_CREATE_DATE, CognitoUserPoolUtils.toZoneDateTime(userCreateDate))
+                .addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUserPoolUtils.toZoneDateTime(userLastModifiedDate))
                 .addAttribute(ATTR_USER_STATUS, status);
 
         for (AttributeType a : attributes) {

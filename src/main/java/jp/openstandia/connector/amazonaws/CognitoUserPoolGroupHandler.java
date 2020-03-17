@@ -12,14 +12,14 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Set;
 
-import static jp.openstandia.connector.amazonaws.CognitoUtils.checkCognitoResult;
-import static jp.openstandia.connector.amazonaws.CognitoUtils.toZoneDateTime;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.checkCognitoResult;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.toZoneDateTime;
 
-public class CognitoGroupHandler {
+public class CognitoUserPoolGroupHandler {
 
     public static final ObjectClass GROUP_OBJECT_CLASS = new ObjectClass("Group");
 
-    private static final Log LOGGER = Log.getLog(CognitoGroupHandler.class);
+    private static final Log LOGGER = Log.getLog(CognitoUserPoolGroupHandler.class);
 
     // Unique and unchangeable within the user pool
     private static final String ATTR_GROUP_NAME = "GroupName";
@@ -38,12 +38,12 @@ public class CognitoGroupHandler {
 
     private final CognitoUserPoolConfiguration configuration;
     private final CognitoIdentityProviderClient client;
-    private final CognitoUserGroupHandler userGroupHandler;
+    private final CognitoUserPoolAssociationHandler userGroupHandler;
 
-    public CognitoGroupHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
+    public CognitoUserPoolGroupHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
         this.configuration = configuration;
         this.client = client;
-        this.userGroupHandler = new CognitoUserGroupHandler(configuration, client);
+        this.userGroupHandler = new CognitoUserPoolAssociationHandler(configuration, client);
     }
 
     public ObjectClassInfo getGroupSchema(UserPoolType userPoolType) {

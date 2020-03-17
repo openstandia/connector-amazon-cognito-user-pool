@@ -15,7 +15,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
-public class CognitoUtils {
+public class CognitoUserPoolUtils {
 
     public static ZonedDateTime toZoneDateTime(Instant instant) {
         ZoneId zone = ZoneId.systemDefault();

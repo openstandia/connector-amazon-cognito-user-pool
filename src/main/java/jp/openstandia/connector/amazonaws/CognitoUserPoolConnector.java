@@ -26,8 +26,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-import static jp.openstandia.connector.amazonaws.CognitoGroupHandler.GROUP_OBJECT_CLASS;
-import static jp.openstandia.connector.amazonaws.CognitoUserHandler.USER_OBJECT_CLASS;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUserHandler.USER_OBJECT_CLASS;
 
 @ConnectorClass(configurationClass = CognitoUserPoolConfiguration.class, displayNameKey = "NRI OpenStandia Amazon Cognito User Pool Connector")
 public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
@@ -114,11 +114,11 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
 
         SchemaBuilder schemaBuilder = new SchemaBuilder(CognitoUserPoolConnector.class);
 
-        CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
+        CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client);
         ObjectClassInfo userSchemaInfo = usersHandler.getUserSchema(userPoolType);
         schemaBuilder.defineObjectClass(userSchemaInfo);
 
-        CognitoGroupHandler group = new CognitoGroupHandler(configuration, client);
+        CognitoUserPoolGroupHandler group = new CognitoUserPoolGroupHandler(configuration, client);
         ObjectClassInfo groupSchemaInfo = group.getGroupSchema(userPoolType);
         schemaBuilder.defineObjectClass(groupSchemaInfo);
 
@@ -151,11 +151,11 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
         }
 
         if (objectClass.equals(USER_OBJECT_CLASS)) {
-            CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
+            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client);
             return usersHandler.createUser(getUserSchemaMap(), createAttributes);
 
         } else if (objectClass.equals(GROUP_OBJECT_CLASS))  {
-            CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
+            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
             return groupsHandler.createGroup(createAttributes);
 
         } else {
@@ -175,11 +175,11 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
         }
 
         if (objectClass.equals(USER_OBJECT_CLASS)) {
-            CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
+            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client);
             return usersHandler.updateUser(getUserSchemaMap(), objectClass, uid, replaceAttributes, options);
 
         } else if (objectClass.equals(GROUP_OBJECT_CLASS))  {
-            CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
+            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
             return groupsHandler.updateGroup(objectClass, uid, replaceAttributes, options);
         }
 
@@ -189,11 +189,11 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
     @Override
     public void delete(ObjectClass objectClass, Uid uid, OperationOptions options) {
         if (objectClass.equals(USER_OBJECT_CLASS)) {
-            CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
+            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client);
             usersHandler.deleteUser(objectClass, uid, options);
 
         } else if (objectClass.equals(GROUP_OBJECT_CLASS))  {
-            CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
+            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
             groupsHandler.deleteGroup(objectClass, uid, options);
 
         } else {
@@ -210,7 +210,7 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
     public void executeQuery(ObjectClass objectClass, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
         if (objectClass.equals(USER_OBJECT_CLASS)) {
             try {
-                CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
+                CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client);
                 usersHandler.getUsers(getUserSchemaMap(), filter, resultsHandler, options);
             } catch (UserNotFoundException e) {
                 // Don't throw UnknownUidException
@@ -219,7 +219,7 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
 
         } else if (objectClass.equals(GROUP_OBJECT_CLASS))  {
             try {
-                CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
+                CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
                 groupsHandler.getGroups(filter, resultsHandler, options);
             } catch (ResourceNotFoundException e) {
                 // Don't throw UnknownUidException

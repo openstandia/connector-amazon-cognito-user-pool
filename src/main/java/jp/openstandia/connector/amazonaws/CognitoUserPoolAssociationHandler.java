@@ -13,16 +13,16 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static jp.openstandia.connector.amazonaws.CognitoUtils.checkCognitoResult;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.checkCognitoResult;
 
-public class CognitoUserGroupHandler {
+public class CognitoUserPoolAssociationHandler {
 
-    private static final Log LOGGER = Log.getLog(CognitoUserHandler.class);
+    private static final Log LOGGER = Log.getLog(CognitoUserPoolUserHandler.class);
 
     private final CognitoUserPoolConfiguration configuration;
     private final CognitoIdentityProviderClient client;
 
-    public CognitoUserGroupHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
+    public CognitoUserPoolAssociationHandler(CognitoUserPoolConfiguration configuration, CognitoIdentityProviderClient client) {
         this.configuration = configuration;
         this.client = client;
     }
