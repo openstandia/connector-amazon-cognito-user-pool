@@ -1,39 +1,59 @@
+/*
+ *  Copyright Nomura Research Institute, Ltd.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 package jp.openstandia.connector.amazonaws;
 
-import com.amazonaws.ClientConfiguration;
-import com.amazonaws.Protocol;
-import com.amazonaws.auth.*;
-import com.amazonaws.regions.Regions;
-import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
-import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProviderClientBuilder;
-import com.amazonaws.services.cognitoidp.model.*;
 import org.identityconnectors.common.StringUtil;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.exceptions.ConfigurationException;
 import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
-import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
-import org.identityconnectors.framework.spi.Connector;
 import org.identityconnectors.framework.spi.ConnectorClass;
+import org.identityconnectors.framework.spi.InstanceNameAware;
+import org.identityconnectors.framework.spi.PoolableConnector;
 import org.identityconnectors.framework.spi.operations.*;
+import software.amazon.awssdk.auth.credentials.*;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.http.apache.ProxyConfiguration;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
+import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClientBuilder;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
 
+import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUserHandler.USER_OBJECT_CLASS;
+
 @ConnectorClass(configurationClass = CognitoUserPoolConfiguration.class, displayNameKey = "NRI OpenStandia Amazon Cognito User Pool Connector")
-public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter> {
+public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
 
     private static final Log LOG = Log.getLog(CognitoUserPoolConnector.class);
 
     private CognitoUserPoolConfiguration configuration;
-    private AWSCognitoIdentityProvider client;
+    private CognitoIdentityProviderClient client;
 
-    private static Map<String, AttributeInfo> userSchemaMap;
+    private Map<String, AttributeInfo> userSchemaMap;
+    private String instanceName;
 
     @Override
     public Configuration getConfiguration() {
@@ -49,74 +69,70 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     }
 
     private void authenticateResource() {
-        final AWSCredentialsProvider[] cp = {new DefaultAWSCredentialsProviderChain()};
+        final AwsCredentialsProvider[] cp = {DefaultCredentialsProvider.create()};
         if (configuration.getAWSAccessKeyID() != null && configuration.getAWSSecretAccessKey() != null) {
             configuration.getAWSAccessKeyID().access(c -> {
                 configuration.getAWSSecretAccessKey().access(s -> {
-                    AWSCredentials cred = new BasicAWSCredentials(String.valueOf(c), String.valueOf(s));
-                    cp[0] = new AWSStaticCredentialsProvider(cred);
+                    AwsCredentials cred = AwsBasicCredentials.create(String.valueOf(c), String.valueOf(s));
+                    cp[0] = StaticCredentialsProvider.create(cred);
                 });
             });
         }
 
-        AWSCognitoIdentityProviderClientBuilder builder = AWSCognitoIdentityProviderClientBuilder.standard()
-                .withCredentials(cp[0]);
+        CognitoIdentityProviderClientBuilder builder = CognitoIdentityProviderClient.builder().credentialsProvider(cp[0]);
 
         String defaultRegion = configuration.getDefaultRegion();
         if (StringUtil.isNotEmpty(defaultRegion)) {
             try {
-                Regions region = Regions.fromName(defaultRegion);
-                builder.setRegion(region.getName());
+                Region region = Region.of(defaultRegion);
+                builder.region(region);
             } catch (IllegalArgumentException e) {
                 LOG.error(e, "Invalid default region: {0}", defaultRegion);
                 throw new ConfigurationException("Invalid default region: " + defaultRegion);
             }
         }
 
-        ClientConfiguration clientConfiguration = new ClientConfiguration();
-        if (StringUtil.isNotEmpty(configuration.getHttpProxyHost())) {
-            clientConfiguration.setProxyProtocol(Protocol.HTTP);
-            clientConfiguration.setProxyHost(configuration.getHttpProxyHost());
-            clientConfiguration.setProxyPort(configuration.getHttpProxyPort());
-            if (StringUtil.isNotEmpty(configuration.getHttpProxyUser())) {
-                clientConfiguration.setProxyUsername(configuration.getHttpProxyUser());
-                if (configuration.getHttpProxyPassword() != null) {
-                    configuration.getHttpProxyPassword().access(c -> {
-                        clientConfiguration.setProxyPassword(String.valueOf(c));
-                    });
-                }
-            }
-        }
-        builder.setClientConfiguration(clientConfiguration);
+        ApacheHttpClient.Builder httpClientBuilder = ApacheHttpClient.builder();
 
-        client = builder.build();
+        if (StringUtil.isNotEmpty(configuration.getHttpProxyHost())) {
+            ProxyConfiguration.Builder proxyBuilder = ProxyConfiguration.builder()
+                    .endpoint(URI.create(String.format("http://%s:%d",
+                            configuration.getHttpProxyHost(), configuration.getHttpProxyPort())));
+            if (StringUtil.isNotEmpty(configuration.getHttpProxyUser()) && configuration.getHttpProxyPassword() != null) {
+                configuration.getHttpProxyPassword().access(c -> {
+                    proxyBuilder.username(configuration.getHttpProxyUser())
+                            .password(String.valueOf(c));
+                });
+            }
+            httpClientBuilder.proxyConfiguration(proxyBuilder.build());
+        }
+
+        client = builder.httpClientBuilder(httpClientBuilder).build();
 
         // Verify we can access the user pool
         describeUserPool();
     }
 
     private UserPoolType describeUserPool() {
-        DescribeUserPoolResult result = client.describeUserPool(new DescribeUserPoolRequest()
-                .withUserPoolId(configuration.getUserPoolID()));
-        int status = result.getSdkHttpMetadata().getHttpStatusCode();
+        DescribeUserPoolResponse result = client.describeUserPool(DescribeUserPoolRequest.builder()
+                .userPoolId(configuration.getUserPoolID()).build());
+        int status = result.sdkHttpResponse().statusCode();
         if (status != 200) {
             throw new ConnectorException("Failed to describe user pool: " + configuration.getUserPoolID());
         }
-        return result.getUserPool();
+        return result.userPool();
     }
 
     @Override
-    public synchronized Schema schema() {
+    public Schema schema() {
         UserPoolType userPoolType = describeUserPool();
 
         SchemaBuilder schemaBuilder = new SchemaBuilder(CognitoUserPoolConnector.class);
 
-        CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-        ObjectClassInfo userSchemaInfo = usersHandler.getUserSchema(userPoolType);
+        ObjectClassInfo userSchemaInfo = CognitoUserPoolUserHandler.getUserSchema(userPoolType);
         schemaBuilder.defineObjectClass(userSchemaInfo);
 
-        CognitoGroupHandler group = new CognitoGroupHandler(configuration, client);
-        ObjectClassInfo groupSchemaInfo = group.getGroupSchema(userPoolType);
+        ObjectClassInfo groupSchemaInfo = CognitoUserPoolGroupHandler.getGroupSchema(userPoolType);
         schemaBuilder.defineObjectClass(groupSchemaInfo);
 
         userSchemaMap = new HashMap<>();
@@ -137,11 +153,6 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     }
 
     @Override
-    public void dispose() {
-        this.client = null;
-    }
-
-    @Override
     public Uid create(ObjectClass objectClass, Set<Attribute> createAttributes, OperationOptions options) {
         if (objectClass == null) {
             throw new InvalidAttributeValueException("ObjectClass value not provided");
@@ -152,12 +163,12 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
             throw new InvalidAttributeValueException("Attributes not provided or empty");
         }
 
-        if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
-            CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-            return usersHandler.createUser(getUserSchemaMap(), createAttributes);
+        if (objectClass.equals(USER_OBJECT_CLASS)) {
+            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
+            return usersHandler.createUser(createAttributes);
 
-        } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
-            CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
+        } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
+            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
             return groupsHandler.createGroup(createAttributes);
 
         } else {
@@ -176,13 +187,13 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
             throw new InvalidAttributeValueException("Attributes not provided or empty");
         }
 
-        if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
-            CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-            return usersHandler.updateUser(getUserSchemaMap(), objectClass, uid, replaceAttributes, options);
+        if (objectClass.equals(USER_OBJECT_CLASS)) {
+            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
+            return usersHandler.updateUser(uid, replaceAttributes, options);
 
-        } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
-            CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
-            return groupsHandler.updateGroup(objectClass, uid, replaceAttributes, options);
+        } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
+            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
+            return groupsHandler.updateGroup(uid, replaceAttributes, options);
         }
 
         throw new UnsupportedOperationException("Unsupported object class " + objectClass);
@@ -190,12 +201,12 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
 
     @Override
     public void delete(ObjectClass objectClass, Uid uid, OperationOptions options) {
-        if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
-            CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-            usersHandler.deleteUser(objectClass, uid, options);
+        if (objectClass.equals(USER_OBJECT_CLASS)) {
+            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
+            usersHandler.deleteUser(uid, options);
 
-        } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
-            CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
+        } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
+            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
             groupsHandler.deleteGroup(objectClass, uid, options);
 
         } else {
@@ -205,26 +216,27 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
 
     @Override
     public FilterTranslator<CognitoUserPoolFilter> createFilterTranslator(ObjectClass objectClass, OperationOptions options) {
-        return new CognitoUserPoolFilterTranslator();
+        return new CognitoUserPoolFilterTranslator(objectClass, options);
     }
 
     @Override
     public void executeQuery(ObjectClass objectClass, CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
-        if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
+        if (objectClass.equals(USER_OBJECT_CLASS)) {
             try {
-                CognitoUserHandler usersHandler = new CognitoUserHandler(configuration, client);
-                usersHandler.getUsers(getUserSchemaMap(), filter, resultsHandler, options);
+                CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
+                usersHandler.getUsers(filter, resultsHandler, options);
             } catch (UserNotFoundException e) {
-                // TODO: fix attributeValue. Currently it isn't uid...
-                throw new UnknownUidException(new Uid(filter.attributeValue), objectClass);
+                // Don't throw UnknownUidException
+                return;
             }
 
-        } else if (objectClass.is(ObjectClass.GROUP_NAME)) {
+        } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
             try {
-                CognitoGroupHandler groupsHandler = new CognitoGroupHandler(configuration, client);
+                CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
                 groupsHandler.getGroups(filter, resultsHandler, options);
             } catch (ResourceNotFoundException e) {
-                throw new UnknownUidException(new Uid(filter.attributeValue), objectClass);
+                // Don't throw UnknownUidException
+                return;
             }
 
         } else {
@@ -236,5 +248,21 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     public void test() {
         dispose();
         authenticateResource();
+    }
+
+    @Override
+    public void dispose() {
+        client.close();
+        this.client = null;
+    }
+
+    @Override
+    public void checkAlive() {
+        // Do nothing
+    }
+
+    @Override
+    public void setInstanceName(String instanceName) {
+        this.instanceName = instanceName;
     }
 }
