@@ -258,7 +258,11 @@ public class CognitoUserPoolUserHandler {
         for (Attribute attr : replaceAttributes) {
             // When the IDM decided to delete the attribute, the value is null
             if (attr.getValue() == null) {
-                updateAttrs.add(toCognitoAttributeForDelete(attr));
+                if (attr.getName().equals(ATTR_GROUPS)) {
+                    groups = Collections.EMPTY_LIST;
+                } else {
+                    updateAttrs.add(toCognitoAttributeForDelete(attr));
+                }
             } else if (attr.getName().equals(OperationalAttributes.ENABLE_NAME)) {
                 userEnabled = AttributeUtil.getBooleanValue(attr);
             } else if (attr.getName().equals(ATTR_GROUPS)) {
