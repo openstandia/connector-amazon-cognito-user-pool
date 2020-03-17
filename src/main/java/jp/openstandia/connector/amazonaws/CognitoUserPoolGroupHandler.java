@@ -220,6 +220,7 @@ public class CognitoUserPoolGroupHandler {
             case "__UID__":
             case "__NAME__":
                 builder.groupName(AttributeUtil.getAsStringValue(a));
+                break;
             case ATTR_DESCRIPTION:
                 builder.description(AttributeUtil.getAsStringValue(a));
                 break;
