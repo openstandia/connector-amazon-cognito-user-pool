@@ -9,9 +9,9 @@ import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
-import org.identityconnectors.framework.spi.Connector;
 import org.identityconnectors.framework.spi.ConnectorClass;
 import org.identityconnectors.framework.spi.InstanceNameAware;
+import org.identityconnectors.framework.spi.PoolableConnector;
 import org.identityconnectors.framework.spi.operations.*;
 import software.amazon.awssdk.auth.credentials.*;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
@@ -28,14 +28,14 @@ import java.util.Map;
 import java.util.Set;
 
 @ConnectorClass(configurationClass = CognitoUserPoolConfiguration.class, displayNameKey = "NRI OpenStandia Amazon Cognito User Pool Connector")
-public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
+public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
 
     private static final Log LOG = Log.getLog(CognitoUserPoolConnector.class);
 
     private CognitoUserPoolConfiguration configuration;
     private CognitoIdentityProviderClient client;
 
-    private static Map<String, AttributeInfo> userSchemaMap;
+    private Map<String, AttributeInfo> userSchemaMap;
     private String instanceName;
 
     @Override
@@ -107,7 +107,7 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     }
 
     @Override
-    public synchronized Schema schema() {
+    public Schema schema() {
         UserPoolType userPoolType = describeUserPool();
 
         SchemaBuilder schemaBuilder = new SchemaBuilder(CognitoUserPoolConnector.class);
@@ -237,6 +237,11 @@ public class CognitoUserPoolConnector implements Connector, CreateOp, UpdateOp, 
     public void test() {
         dispose();
         authenticateResource();
+    }
+
+    @Override
+    public void checkAlive() {
+        // Do nothing
     }
 
     @Override
