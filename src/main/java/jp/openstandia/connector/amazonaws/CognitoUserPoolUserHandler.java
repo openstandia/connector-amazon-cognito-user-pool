@@ -16,6 +16,7 @@
 package jp.openstandia.connector.amazonaws;
 
 import org.identityconnectors.common.logging.Log;
+import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
 import org.identityconnectors.framework.common.exceptions.UnknownUidException;
@@ -58,6 +59,9 @@ public class CognitoUserPoolUserHandler {
 
     // Association
     private static final String ATTR_GROUPS = "groups";
+
+    // Password
+    private static final String ATTR_PASSWORD_PERMANENT = "password_permanent";
 
     private static final CognitoUserPoolFilter.SubFilter SUB_FILTER = new CognitoUserPoolFilter.SubFilter();
 
@@ -104,6 +108,14 @@ public class CognitoUserPoolUserHandler {
 
         // __ENABLE__ attribute
         builder.addAttributeInfo(OperationalAttributeInfos.ENABLE);
+
+        // __PASSWORD__ attribute
+        builder.addAttributeInfo(OperationalAttributeInfos.PASSWORD);
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_PASSWORD_PERMANENT)
+                .setType(Boolean.class)
+                .setReadable(false)
+                .setReturnedByDefault(false)
+                .build());
 
         // Other attributes
         List<AttributeInfo> attrInfoList = userPoolType.schemaAttributes().stream()
@@ -187,6 +199,8 @@ public class CognitoUserPoolUserHandler {
                 .userPoolId(configuration.getUserPoolID());
 
         boolean userEnabled = true;
+        GuardedString newPassword = null;
+        Boolean passwordPermanent = null;
         List<Object> groups = null;
 
         for (Attribute a : attributes) {
@@ -194,6 +208,10 @@ public class CognitoUserPoolUserHandler {
                 request.username(AttributeUtil.getAsStringValue(a));
             } else if (a.getName().equals(OperationalAttributes.ENABLE_NAME)) {
                 userEnabled = AttributeUtil.getBooleanValue(a);
+            } else if (a.getName().equals(OperationalAttributes.PASSWORD_NAME)) {
+                newPassword = AttributeUtil.getGuardedStringValue(a);
+            } else if (a.getName().equals(ATTR_PASSWORD_PERMANENT)) {
+                passwordPermanent = AttributeUtil.getBooleanValue(a);
             } else if (a.getName().equals(ATTR_GROUPS)) {
                 groups = a.getValue();
             } else {
@@ -214,23 +232,48 @@ public class CognitoUserPoolUserHandler {
 
         UserType user = result.user();
         Uid newUid = new Uid(user.attributes().stream()
-                .filter(a -> a.name().equals(ATTR_SUB)).findFirst().get().value(), user.username());
+                .filter(a -> a.name().equals(ATTR_SUB))
+                .findFirst()
+                .get()
+                .value(), user.username());
 
-        // We need to call another API to enable/disable user.
+        // We need to call another API to enable/disable user, password changing and add/remove group for this user.
         // It means that we can't execute this operation as a single transaction.
-        // Therefore, Cognito data may be inconsistent if below calling is failed.
-        // Although this connector don't handle this situation, IDM can retry the update to resolve this inconsistency.
+        // Therefore, Cognito data may be inconsistent if below callings are failed.
+        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
         if (!userEnabled) {
             disableUser(newUid, newUid.getNameHint());
         }
-
-        // We need to call another API to add/remove group for this user.
-        // It means that we can't execute this update as a single transaction.
-        // Therefore, Cognito data may be inconsistent if below calling is failed.
-        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
+        updatePassword(user.username(), newPassword, passwordPermanent);
         userGroupHandler.updateGroupsToUser(newUid.getNameHint(), groups);
 
         return newUid;
+    }
+
+    private void updatePassword(String username, GuardedString password, final Boolean permanent) {
+        if (password == null) {
+            return;
+        }
+        password.access(a -> {
+            String clearPassword = String.valueOf(a);
+
+            AdminSetUserPasswordRequest request = AdminSetUserPasswordRequest.builder()
+                    .userPoolId(configuration.getUserPoolID())
+                    .username(username)
+                    .permanent(permanent)
+                    .password(clearPassword)
+                    .build();
+
+            try {
+                AdminSetUserPasswordResponse response = client.adminSetUserPassword(request);
+
+                checkCognitoResult(response, "AdminSetUserPassword");
+            } catch (InvalidPasswordException e) {
+                InvalidAttributeValueException ex = new InvalidAttributeValueException("Password policy error in cognito", e);
+                ex.setAffectedAttributeNames(Arrays.asList(OperationalAttributes.PASSWORD_NAME));
+                throw ex;
+            }
+        });
     }
 
     /**
@@ -253,6 +296,8 @@ public class CognitoUserPoolUserHandler {
 //        Collection<String> deleteAttrs = new ArrayList<>();
 
         Boolean userEnabled = null;
+        GuardedString newPassword = null;
+        Boolean passwordPermanent = null;
         List<Object> groups = null;
 
         for (Attribute attr : replaceAttributes) {
@@ -265,6 +310,10 @@ public class CognitoUserPoolUserHandler {
                 }
             } else if (attr.getName().equals(OperationalAttributes.ENABLE_NAME)) {
                 userEnabled = AttributeUtil.getBooleanValue(attr);
+            } else if (attr.getName().equals(OperationalAttributes.PASSWORD_NAME)) {
+                newPassword = AttributeUtil.getGuardedStringValue(attr);
+            } else if (attr.getName().equals(ATTR_PASSWORD_PERMANENT)) {
+                passwordPermanent = AttributeUtil.getBooleanValue(attr);
             } else if (attr.getName().equals(ATTR_GROUPS)) {
                 groups = attr.getValue();
             } else {
@@ -287,30 +336,12 @@ public class CognitoUserPoolUserHandler {
             }
         }
 
-        // We need to call another API to delete attributes.
-        // It means that we can't execute this update as a single transaction.
-        // Therefore, Cognito data may be inconsistent if below calling is failed.
-        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
-//        if (deleteAttrs.size() > 0) {
-//            AdminDeleteUserAttributesRequest request = new AdminDeleteUserAttributesRequest()
-//                    .withUserPoolId(configuration.getUserPoolID())
-//                    .withUsername(name.getNameValue())
-//                    .withUserAttributeNames(deleteAttrs);
-//            AdminDeleteUserAttributesResult result = client.adminDeleteUserAttributes(request);
-//
-//            checkCognitoResult(result, "AdminDeleteUserAttributes");
-//        }
-
-        // We need to call another API to enable/disable user.
-        // It means that we can't execute this update as a single transaction.
-        // Therefore, Cognito data may be inconsistent if below calling is failed.
+        // We need to call another API to enable/disable user, password changing and add/remove group for this user.
+        // It means that we can't execute this operation as a single transaction.
+        // Therefore, Cognito data may be inconsistent if below callings are failed.
         // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
         enableOrDisableUser(uid, name, userEnabled);
-
-        // We need to call another API to add/remove group for this user.
-        // It means that we can't execute this update as a single transaction.
-        // Therefore, Cognito data may be inconsistent if below calling is failed.
-        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
+        updatePassword(name.getNameValue(), newPassword, passwordPermanent);
         userGroupHandler.updateGroupsToUser(name, groups);
 
         return uid;

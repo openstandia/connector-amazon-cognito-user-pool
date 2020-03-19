@@ -9,7 +9,7 @@ Connector for [Amazon Cognito User Pool](https://aws.amazon.com/cognito) using [
 * Schema: YES
 * Provisioning: YES
 * Live Synchronization: No
-* Password: No
+* Password: YES
 * Activation: YES
 * Script execution: No 
 
