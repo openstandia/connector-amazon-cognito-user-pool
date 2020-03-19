@@ -121,7 +121,7 @@ public class CognitoUserPoolUserHandler {
         List<AttributeInfo> attrInfoList = userPoolType.schemaAttributes().stream()
                 .filter(a -> !a.name().equals(ATTR_SUB))
                 .map(s -> {
-                    AttributeInfoBuilder attrInfo = AttributeInfoBuilder.define(escapeName(s.name()));
+                    AttributeInfoBuilder attrInfo = AttributeInfoBuilder.define(s.name());
                     attrInfo.setRequired(s.required());
                     attrInfo.setUpdateable(s.mutable());
 
@@ -530,7 +530,7 @@ public class CognitoUserPoolUserHandler {
             if (a.name().equals(ATTR_SUB)) {
                 builder.setUid(a.value());
             } else {
-                AttributeInfo attributeInfo = schema.get(escapeName(a.name()));
+                AttributeInfo attributeInfo = schema.get(a.name());
                 if (shouldReturn(attrsToGetSet, attributeInfo.getName())) {
                     builder.addAttribute(toConnectorAttribute(attributeInfo, a));
                 }
