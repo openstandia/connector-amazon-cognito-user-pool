@@ -89,7 +89,7 @@ public class CognitoUserPoolUtils {
         // The key of the schema is escaped key
         AttributeInfo attributeInfo = schema.get(attr.getName());
         if (attributeInfo == null) {
-            throw new InvalidAttributeValueException("");
+            throw new InvalidAttributeValueException("Invalid attribute. name: " + attr.getName());
         }
 
         if (attributeInfo.getType() == Integer.class) {
