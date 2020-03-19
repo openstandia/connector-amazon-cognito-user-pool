@@ -57,18 +57,18 @@ public class CognitoUserPoolUtils {
         // We need to check the type from the schema and convert it.
         // Also, we must escape the name for custom attributes (The name of custom attribute starts with "custom:").
         if (attributeInfo.getType() == Integer.class) {
-            return AttributeBuilder.build(escapeName(a.name()), Integer.parseInt(a.value()));
+            return AttributeBuilder.build(a.name(), Integer.parseInt(a.value()));
         }
         if (attributeInfo.getType() == ZonedDateTime.class) {
             // The format is YYYY-MM-DD
-            return AttributeBuilder.build(escapeName(a.name()), toZoneDateTime(a.value()));
+            return AttributeBuilder.build(a.name(), toZoneDateTime(a.value()));
         }
         if (attributeInfo.getType() == Boolean.class) {
-            return AttributeBuilder.build(escapeName(a.name()), Boolean.parseBoolean(a.value()));
+            return AttributeBuilder.build(a.name(), Boolean.parseBoolean(a.value()));
         }
 
         // String
-        return AttributeBuilder.build(escapeName(a.name()), a.value());
+        return AttributeBuilder.build(a.name(), a.value());
     }
 
     /**
@@ -80,7 +80,7 @@ public class CognitoUserPoolUtils {
      */
     public static AttributeType toCognitoAttribute(Map<String, AttributeInfo> schema, Attribute attr) {
         return AttributeType.builder()
-                .name(unescapeName(attr.getName()))
+                .name(attr.getName())
                 .value(toCognitoValue(schema, attr))
                 .build();
     }
@@ -116,32 +116,9 @@ public class CognitoUserPoolUtils {
     public static AttributeType toCognitoAttributeForDelete(Attribute attr) {
         // Cognito deletes the attribute when updating the value with ""
         return AttributeType.builder()
-                .name(unescapeName(attr.getName()))
+                .name(attr.getName())
                 .value("")
                 .build();
-    }
-
-    /**
-     * User Custom attribute has ":" in the name.
-     * We need to replace it to other character because ":" is reserved as character in XML identifiers and
-     * may be used only for binding XML Namespace word in the IDM side.
-     * We choice "_" as the alternative character.
-     *
-     * @param name
-     * @return
-     */
-    public static String escapeName(String name) {
-        return name.replaceAll("^custom:", "custom_");
-    }
-
-    /**
-     * Restore the escaped name to original cognito name.
-     *
-     * @param name
-     * @return
-     */
-    public static String unescapeName(String name) {
-        return name.replaceAll("^custom_", "custom:");
     }
 
     /**
