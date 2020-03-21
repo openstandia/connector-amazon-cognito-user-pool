@@ -45,25 +45,6 @@ class UserTest {
     }
 
     @Test
-    void schema() {
-        Schema schema = connector.schema();
-
-        assertNotNull(schema);
-        assertEquals(2, schema.getObjectClassInfo().size());
-
-        Optional<ObjectClassInfo> user = schema.getObjectClassInfo().stream().filter(o -> o.is("User")).findFirst();
-        Optional<ObjectClassInfo> group = schema.getObjectClassInfo().stream().filter(o -> o.is("Group")).findFirst();
-
-        assertTrue(user.isPresent());
-        assertTrue(group.isPresent());
-    }
-
-    @Test
-    void test() {
-        connector.test();
-    }
-
-    @Test
     void createUser() {
         // Given
         String username = "foo";
@@ -251,7 +232,6 @@ class UserTest {
         // Then
         assertNotNull(requestedNewEmail.get());
         assertEquals(newEmail, requestedNewEmail.get().get());
-        assertNotNull(requestedNewPassword.get());
         assertEquals("secret", requestedNewPassword.get());
         assertNull(requestedPasswordPermanent.get());
     }
@@ -280,9 +260,7 @@ class UserTest {
                 new Uid(sub, new Name(username)), modifications, new OperationOptionsBuilder().build());
 
         // Then
-        assertNotNull(requestedNewPassword.get());
         assertEquals("secret", requestedNewPassword.get());
-        assertNotNull(requestedPasswordPermanent.get());
         assertTrue(requestedPasswordPermanent.get());
     }
 
@@ -304,7 +282,6 @@ class UserTest {
                 new Uid(sub, new Name(username)), new OperationOptionsBuilder().build());
 
         // Then
-        assertNotNull(requestedUsername.get());
         assertEquals(username, requestedUsername.get());
     }
 

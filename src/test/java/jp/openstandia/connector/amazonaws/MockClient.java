@@ -6,6 +6,7 @@ import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.http.SdkHttpResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
+import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListUsersInGroupIterable;
 
 import java.util.function.Function;
 
@@ -23,6 +24,12 @@ public class MockClient implements CognitoIdentityProviderClient {
     private Function<AdminDeleteUserRequest, AdminDeleteUserResponse> adminDeleteUser;
     private Function<AdminAddUserToGroupRequest, AdminAddUserToGroupResponse> adminAddUserToGroup;
     private Function<AdminRemoveUserFromGroupRequest, AdminRemoveUserFromGroupResponse> adminRemoveUserFromGroup;
+
+    private Function<CreateGroupRequest, CreateGroupResponse> createGroup;
+    private Function<UpdateGroupRequest, UpdateGroupResponse> updateGroup;
+    private Function<DeleteGroupRequest, DeleteGroupResponse> deleteGroup;
+    private Function<ListUsersInGroupRequest, ListUsersInGroupIterable> listUsersInGroupPaginator;
+    private Function<ListUsersInGroupRequest, ListUsersInGroupResponse> listUsersInGroup;
 
     public void init() {
         closed = false;
@@ -175,6 +182,51 @@ public class MockClient implements CognitoIdentityProviderClient {
 
     @Override
     public AdminUpdateUserAttributesResponse adminUpdateUserAttributes(AdminUpdateUserAttributesRequest request) throws AwsServiceException, SdkClientException {
-        return this.adminUpdateUserAttributes.apply(request);
+        return adminUpdateUserAttributes.apply(request);
+    }
+
+    @Override
+    public CreateGroupResponse createGroup(CreateGroupRequest request) throws AwsServiceException, SdkClientException {
+        return createGroup.apply(request);
+    }
+
+    public void createGroup(Function<CreateGroupRequest, CreateGroupResponse> mock) {
+        this.createGroup = mock;
+    }
+
+    @Override
+    public UpdateGroupResponse updateGroup(UpdateGroupRequest request) throws AwsServiceException, SdkClientException {
+        return updateGroup.apply(request);
+    }
+
+    public void updateGroup(Function<UpdateGroupRequest, UpdateGroupResponse> mock) {
+        this.updateGroup = mock;
+    }
+
+    @Override
+    public DeleteGroupResponse deleteGroup(DeleteGroupRequest request) throws AwsServiceException, SdkClientException {
+        return deleteGroup.apply(request);
+    }
+
+    public void deleteGroup(Function<DeleteGroupRequest, DeleteGroupResponse> mock) {
+        this.deleteGroup = mock;
+    }
+
+    @Override
+    public ListUsersInGroupIterable listUsersInGroupPaginator(ListUsersInGroupRequest request) throws AwsServiceException, SdkClientException {
+        return listUsersInGroupPaginator.apply(request);
+    }
+
+    public void listUsersInGroupPaginator(Function<ListUsersInGroupRequest, ListUsersInGroupIterable> mock) {
+        this.listUsersInGroupPaginator = mock;
+    }
+
+    @Override
+    public ListUsersInGroupResponse listUsersInGroup(ListUsersInGroupRequest request) throws AwsServiceException, SdkClientException {
+        return listUsersInGroup.apply(request);
+    }
+
+    public void listUsersInGroup(Function<ListUsersInGroupRequest, ListUsersInGroupResponse> mock) {
+        this.listUsersInGroup = mock;
     }
 }

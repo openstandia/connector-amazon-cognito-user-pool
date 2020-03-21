@@ -127,7 +127,7 @@ public class CognitoUserPoolGroupHandler {
         GroupModel newGroup = new GroupModel();
 
         for (Attribute attr : attributes) {
-            if (attr.getName().equals(ATTR_GROUP_NAME)) {
+            if (attr.getName().equals(Name.NAME)) {
                 newGroup.applyGroupName(attr);
 
             } else if (attr.getName().equals(ATTR_DESCRIPTION)) {
@@ -166,7 +166,7 @@ public class CognitoUserPoolGroupHandler {
         }
 
         GroupType group = result.group();
-        Uid newUid = new Uid(group.groupName(), group.groupName());
+        Uid newUid = new Uid(group.groupName(), new Name(group.groupName()));
 
         try {
             // We need to call another API to add/remove user for this group.

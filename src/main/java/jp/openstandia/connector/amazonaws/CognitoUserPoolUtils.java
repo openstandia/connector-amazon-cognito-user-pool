@@ -189,7 +189,7 @@ public class CognitoUserPoolUtils {
 
     public static void invalidSchema(String name) throws InvalidAttributeValueException {
         InvalidAttributeValueException exception = new InvalidAttributeValueException(
-                String.format("Cognito doesn't support to modify '%s' attribute of User", name));
+                String.format("Cognito doesn't support to set '%s' attribute", name));
         exception.setAffectedAttributeNames(Arrays.asList(name));
         throw exception;
     }
