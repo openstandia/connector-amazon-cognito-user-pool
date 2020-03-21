@@ -24,6 +24,18 @@ public class MockClient implements CognitoIdentityProviderClient {
     private Function<AdminAddUserToGroupRequest, AdminAddUserToGroupResponse> adminAddUserToGroup;
     private Function<AdminRemoveUserFromGroupRequest, AdminRemoveUserFromGroupResponse> adminRemoveUserFromGroup;
 
+    public void init() {
+        closed = false;
+        adminCreateUser = null;
+        adminEnableUser = null;
+        adminDisableUser = null;
+        adminSetUserPassword = null;
+        adminUpdateUserAttributes = null;
+        adminDeleteUser = null;
+        adminAddUserToGroup = null;
+        adminRemoveUserFromGroup = null;
+    }
+
     private MockClient() {
     }
 
@@ -33,16 +45,7 @@ public class MockClient implements CognitoIdentityProviderClient {
 
     public static <T> T buildSuccess(CognitoIdentityProviderResponse.Builder builder, Class<T> clazz) {
         SdkResponse response = builder.sdkHttpResponse(SdkHttpResponse.builder().statusCode(200).build()).build();
-        return (T)response;
-    }
-
-    public void init() {
-        closed = false;
-        adminCreateUser = null;
-        adminEnableUser  = null;
-        adminDisableUser = null;
-        adminSetUserPassword = null;
-        adminUpdateUserAttributes = null;
+        return (T) response;
     }
 
     @Override
