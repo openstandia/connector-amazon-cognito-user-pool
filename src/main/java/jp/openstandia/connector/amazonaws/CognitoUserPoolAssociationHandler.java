@@ -42,6 +42,12 @@ public class CognitoUserPoolAssociationHandler {
         this.client = client;
     }
 
+    public void addGroupsToUser(Name name, List<Object> addGroups) {
+        if (!addGroups.isEmpty()) {
+            addGroups.stream().forEach(g -> addUserToGroup(name.getNameValue(), g.toString()));
+        }
+    }
+
     public void updateGroupsToUser(Name name, List<Object> addGroups, List<Object> removeGroups) {
         if (!addGroups.isEmpty()) {
             addGroups.stream().forEach(g -> addUserToGroup(name.getNameValue(), g.toString()));
@@ -49,25 +55,6 @@ public class CognitoUserPoolAssociationHandler {
         if (!removeGroups.isEmpty()) {
             removeGroups.stream().forEach(g -> removeUserFromGroup(name.getNameValue(), g.toString()));
         }
-    }
-
-    public void updateGroupsToUser(Name name, List<Object> addGroups) {
-        if (addGroups == null) {
-            return;
-        }
-
-        Set<String> addGroupsSet = addGroups.stream()
-                .map(o -> o.toString())
-                .collect(Collectors.toSet());
-
-        getGroups(name.getNameValue(), g -> {
-            if (!addGroupsSet.remove(g.groupName())) {
-                removeUserFromGroup(name.getNameValue(), g.groupName());
-            }
-        });
-
-        // Add groups to the user
-        addGroupsSet.forEach(g -> addUserToGroup(name.getNameValue(), g));
     }
 
     public void updateUsersToGroup(Uid groupUid, List<Object> addUsers, List<Object> removeUsers) {
