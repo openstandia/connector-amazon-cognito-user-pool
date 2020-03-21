@@ -45,12 +45,12 @@ import static jp.openstandia.connector.amazonaws.CognitoUserPoolGroupHandler.GRO
 import static jp.openstandia.connector.amazonaws.CognitoUserPoolUserHandler.USER_OBJECT_CLASS;
 
 @ConnectorClass(configurationClass = CognitoUserPoolConfiguration.class, displayNameKey = "NRI OpenStandia Amazon Cognito User Pool Connector")
-public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
+public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, UpdateDeltaOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
 
     private static final Log LOG = Log.getLog(CognitoUserPoolConnector.class);
 
-    private CognitoUserPoolConfiguration configuration;
-    private CognitoIdentityProviderClient client;
+    protected CognitoUserPoolConfiguration configuration;
+    protected CognitoIdentityProviderClient client;
 
     private Map<String, AttributeInfo> userSchemaMap;
     private String instanceName;
@@ -68,7 +68,7 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
         LOG.ok("Connector {0} successfully initialized", getClass().getName());
     }
 
-    private void authenticateResource() {
+    protected void authenticateResource() {
         final AwsCredentialsProvider[] cp = {DefaultCredentialsProvider.create()};
         if (configuration.getAWSAccessKeyID() != null && configuration.getAWSSecretAccessKey() != null) {
             configuration.getAWSAccessKeyID().access(c -> {
@@ -177,23 +177,14 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
     }
 
     @Override
-    public Uid update(ObjectClass objectClass, Uid uid, Set<Attribute> replaceAttributes, OperationOptions options) {
-        if (objectClass == null) {
-            throw new InvalidAttributeValueException("ObjectClass value not provided");
-        }
-        LOG.info("UPDATE METHOD OBJECTCLASS VALUE: {0}", objectClass);
-
-        if (replaceAttributes == null) {
-            throw new InvalidAttributeValueException("Attributes not provided or empty");
-        }
-
+    public Set<AttributeDelta> updateDelta(ObjectClass objectClass, Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
         if (objectClass.equals(USER_OBJECT_CLASS)) {
             CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
-            return usersHandler.updateUser(uid, replaceAttributes, options);
+            return usersHandler.updateDelta(uid, modifications, options);
 
         } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
             CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
-            return groupsHandler.updateGroup(uid, replaceAttributes, options);
+            return groupsHandler.updateDelta(uid, modifications, options);
         }
 
         throw new UnsupportedOperationException("Unsupported object class " + objectClass);
