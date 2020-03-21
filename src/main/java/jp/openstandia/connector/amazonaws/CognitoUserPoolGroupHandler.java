@@ -279,7 +279,8 @@ public class CognitoUserPoolGroupHandler {
 
         void applyDescription(AttributeDelta delta) {
             if (delta.getValuesToReplace().isEmpty()) {
-                // Description is removed if we set ""
+                // Try to remove Description by setting "".
+                // But it doesn't work currently due to Cognito limitation...?
                 this.description = "";
             } else {
                 this.description = AttributeDeltaUtil.getAsStringValue(delta);
@@ -305,7 +306,8 @@ public class CognitoUserPoolGroupHandler {
 
         void applyRoleArn(AttributeDelta delta) {
             if (delta.getValuesToReplace().isEmpty()) {
-                // RoleArn is removed if we set ""
+                // Try to remove RoleArn by setting "".
+                // But it doesn't work currently due to Cognito limitation...?
                 this.roleArn = "";
             } else {
                 this.roleArn = AttributeDeltaUtil.getAsStringValue(delta);
