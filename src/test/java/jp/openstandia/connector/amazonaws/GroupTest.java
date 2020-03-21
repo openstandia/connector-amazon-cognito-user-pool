@@ -20,8 +20,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static jp.openstandia.connector.amazonaws.MockClient.buildSuccess;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.*;
 
 class GroupTest {
 
@@ -75,7 +74,7 @@ class GroupTest {
 
         // Then
         assertEquals(groupName, uid.getUidValue());
-        assertEquals(groupName, uid.getNameHintValue());
+        assertNull(uid.getNameHint(), "Group shouldn't include Name object in the Uid" );
     }
 
     @Test

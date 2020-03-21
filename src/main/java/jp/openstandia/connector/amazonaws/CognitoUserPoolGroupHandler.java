@@ -166,7 +166,11 @@ public class CognitoUserPoolGroupHandler {
         }
 
         GroupType group = result.group();
-        Uid newUid = new Uid(group.groupName(), new Name(group.groupName()));
+
+        // Caution! Don't include Name object in the Uid
+        // because it throws SchemaException with "No definition for ConnId NAME attribute found in definition crOCD
+        // ({http://midpoint.evolveum.com/xml/ns/public/resource/instance-3}Group)".
+        Uid newUid = new Uid(group.groupName());
 
         try {
             // We need to call another API to add/remove user for this group.
