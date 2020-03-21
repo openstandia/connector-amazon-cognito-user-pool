@@ -26,7 +26,7 @@ class BasicTest {
 
     private ConnectorFacade newFacade() {
         ConnectorFacadeFactory factory = ConnectorFacadeFactory.getInstance();
-        APIConfiguration impl = TestHelpers.createTestConfiguration(MockConnector.class, newConfiguration());
+        APIConfiguration impl = TestHelpers.createTestConfiguration(LocalCognitoUserPoolConnector.class, newConfiguration());
         impl.getResultsHandlerConfiguration().setEnableAttributesToGetSearchResultsHandler(false);
         impl.getResultsHandlerConfiguration().setEnableNormalizingResultsHandler(false);
         impl.getResultsHandlerConfiguration().setEnableFilteredResultsHandler(false);
