@@ -1,6 +1,6 @@
 package jp.openstandia.connector.amazonaws;
 
-public class TestConnector extends CognitoUserPoolConnector {
+public class MockConnector extends CognitoUserPoolConnector {
     @Override
     protected void authenticateResource() {
         client = MockClient.instance();

@@ -35,7 +35,7 @@ class GroupTest {
 
     private ConnectorFacade newFacade() {
         ConnectorFacadeFactory factory = ConnectorFacadeFactory.getInstance();
-        APIConfiguration impl = TestHelpers.createTestConfiguration(TestConnector.class, newConfiguration());
+        APIConfiguration impl = TestHelpers.createTestConfiguration(MockConnector.class, newConfiguration());
         impl.getResultsHandlerConfiguration().setEnableAttributesToGetSearchResultsHandler(false);
         impl.getResultsHandlerConfiguration().setEnableNormalizingResultsHandler(false);
         impl.getResultsHandlerConfiguration().setEnableFilteredResultsHandler(false);
