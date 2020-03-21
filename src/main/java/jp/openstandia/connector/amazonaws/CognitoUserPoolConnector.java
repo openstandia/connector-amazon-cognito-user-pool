@@ -49,8 +49,8 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
 
     private static final Log LOG = Log.getLog(CognitoUserPoolConnector.class);
 
-    private CognitoUserPoolConfiguration configuration;
-    private CognitoIdentityProviderClient client;
+    protected CognitoUserPoolConfiguration configuration;
+    protected CognitoIdentityProviderClient client;
 
     private Map<String, AttributeInfo> userSchemaMap;
     private String instanceName;
@@ -68,7 +68,7 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
         LOG.ok("Connector {0} successfully initialized", getClass().getName());
     }
 
-    private void authenticateResource() {
+    protected void authenticateResource() {
         final AwsCredentialsProvider[] cp = {DefaultCredentialsProvider.create()};
         if (configuration.getAWSAccessKeyID() != null && configuration.getAWSSecretAccessKey() != null) {
             configuration.getAWSAccessKeyID().access(c -> {

@@ -247,13 +247,14 @@ public class CognitoUserPoolUserHandler {
                 .filter(a -> a.name().equals(ATTR_SUB))
                 .findFirst()
                 .get()
-                .value(), user.username());
+                .value(),
+                new Name(user.username()));
 
         // We need to call another API to enable/disable user, password changing and add/remove group for this user.
         // It means that we can't execute this operation as a single transaction.
         // Therefore, Cognito data may be inconsistent if below callings are failed.
         // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
-        if (!newUser.userEnabled) {
+        if (Boolean.FALSE.equals(newUser.userEnabled)) {
             disableUser(newUid, newUid.getNameHint());
         }
         updatePassword(user.username(), newUser.newPassword, newUser.passwordPermanent);
