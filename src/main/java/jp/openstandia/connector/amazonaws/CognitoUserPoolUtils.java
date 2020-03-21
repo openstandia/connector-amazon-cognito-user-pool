@@ -15,6 +15,7 @@
  */
 package jp.openstandia.connector.amazonaws;
 
+import org.identityconnectors.common.CollectionUtil;
 import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
 import org.identityconnectors.framework.common.objects.*;
@@ -26,7 +27,11 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Map;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Provides utility methods
@@ -180,5 +185,12 @@ public class CognitoUserPoolUtils {
     public static boolean shouldReturnPartialAttributeValues(OperationOptions options) {
         // If the option isn't set from IDM, it may be null.
         return options.getAllowPartialAttributeValues() == Boolean.TRUE;
+    }
+
+    public static void invalidSchema(String name) throws InvalidAttributeValueException {
+        InvalidAttributeValueException exception = new InvalidAttributeValueException(
+                String.format("Cognito doesn't support to modify '%s' attribute of User", name));
+        exception.setAffectedAttributeNames(Arrays.asList(name));
+        throw exception;
     }
 }

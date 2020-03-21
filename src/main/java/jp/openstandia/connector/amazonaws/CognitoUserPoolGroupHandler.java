@@ -29,8 +29,7 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Set;
 
-import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.checkCognitoResult;
-import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.toZoneDateTime;
+import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.*;
 
 public class CognitoUserPoolGroupHandler {
 
@@ -125,17 +124,36 @@ public class CognitoUserPoolGroupHandler {
         if (attributes == null || attributes.isEmpty()) {
             throw new InvalidAttributeValueException("attributes not provided or empty");
         }
+        GroupModel newGroup = new GroupModel();
 
-        CreateGroupRequest.Builder builder = CreateGroupRequest.builder()
-                .userPoolId(configuration.getUserPoolID());
+        for (Attribute attr : attributes) {
+            if (attr.getName().equals(ATTR_GROUP_NAME)) {
+                newGroup.applyGroupName(attr);
 
-        List<Object> users = null;
+            } else if (attr.getName().equals(ATTR_DESCRIPTION)) {
+                newGroup.applyDescription(attr);
 
-        for (Attribute a : attributes) {
-            users = buildCreateRequest(builder, a);
+            } else if (attr.getName().equals(ATTR_PRECEDENCE)) {
+                newGroup.applyPrecedence(attr);
+
+            } else if (attr.getName().equals(ATTR_ROLE_ARN)) {
+                newGroup.applyRoleArn(attr);
+
+            } else if (attr.getName().equals(ATTR_USERS)) {
+                newGroup.applyUsers(attr);
+
+            } else {
+                invalidSchema(attr.getName());
+            }
         }
 
-        CreateGroupRequest request = builder.build();
+        CreateGroupRequest request = CreateGroupRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .groupName(newGroup.groupName)
+                .description(newGroup.description)
+                .precedence(newGroup.precedence)
+                .roleArn(newGroup.roleArn)
+                .build();
 
         CreateGroupResponse result = null;
         try {
@@ -155,7 +173,7 @@ public class CognitoUserPoolGroupHandler {
             // It means that we can't execute this update as a single transaction.
             // Therefore, Cognito data may be inconsistent if below calling is failed.
             // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
-            userGroupHandler.updateUsersToGroup(newUid, users);
+            userGroupHandler.updateUsersToGroup(newUid, newGroup.addUsers);
 
         } catch (ResourceNotFoundException e) {
             LOGGER.warn(e, "The group was deleted when setting users of the group after created. GroupName: {0}", request.groupName());
@@ -180,30 +198,39 @@ public class CognitoUserPoolGroupHandler {
      * @return
      */
     public Set<AttributeDelta> updateDelta(Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
-        UpdateGroupRequest.Builder request = UpdateGroupRequest.builder()
-                .userPoolId(configuration.getUserPoolID())
-                .groupName(uid.getUidValue());
-
-        List<Object> addUsers = null;
-        List<Object> removeUsers = null;
+        GroupModel modifyGroup = new GroupModel();
 
         for (AttributeDelta delta : modifications) {
-            if (delta.getValuesToAdd() != null) {
-                addUsers = buildAddValue(request, delta);
-            } else if (delta.getValuesToRemove() != null) {
-                removeUsers = buildDeleteValue(request, delta);
-            } else if (delta.getValuesToReplace() != null) {
-                buildReplaceValue(request, delta);
+            if (delta.getName().equals(ATTR_DESCRIPTION)) {
+                modifyGroup.applyDescription(delta);
+
+            } else if (delta.getName().equals(ATTR_PRECEDENCE)) {
+                modifyGroup.applyPrecedence(delta);
+
+            } else if (delta.getName().equals(ATTR_ROLE_ARN)) {
+                modifyGroup.applyRoleArn(delta);
+
+            } else if (delta.getName().equals(ATTR_USERS)) {
+                modifyGroup.applyUsers(delta);
+
+            } else {
+                invalidSchema(delta.getName());
             }
         }
 
-        UpdateGroupRequest req = request.build();
-
-        if (req.description() != null ||
-                req.precedence() != null ||
-                req.roleArn() != null) {
+        if (modifyGroup.description != null ||
+                modifyGroup.precedence != null ||
+                modifyGroup.roleArn != null) {
             try {
-                UpdateGroupResponse result = client.updateGroup(req);
+                UpdateGroupRequest request = UpdateGroupRequest.builder()
+                        .userPoolId(configuration.getUserPoolID())
+                        .groupName(uid.getUidValue())
+                        .description(modifyGroup.description)
+                        .precedence(modifyGroup.precedence)
+                        .roleArn(modifyGroup.roleArn)
+                        .build();
+
+                UpdateGroupResponse result = client.updateGroup(request);
 
                 checkCognitoResult(result, "UpdateGroup");
             } catch (ResourceNotFoundException e) {
@@ -217,100 +244,82 @@ public class CognitoUserPoolGroupHandler {
         // Therefore, Cognito data may be inconsistent if below calling is failed.
         // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
         try {
-            userGroupHandler.updateUsersToGroup(uid, addUsers, removeUsers);
+            userGroupHandler.updateUsersToGroup(uid, modifyGroup.addUsers, modifyGroup.removeUsers);
         } catch (ResourceNotFoundException e) {
             LOGGER.warn(e, "Not found group when updating. uid: {0}", uid);
             throw new UnknownUidException(uid, GROUP_OBJECT_CLASS);
         } catch (UserNotFoundException e) {
             LOGGER.warn(e, "Not found the user when updating. uid: {0}, addUsers: {1}, removeUsers: {2}",
-                    uid, addUsers, removeUsers);
+                    uid, modifyGroup.addUsers, modifyGroup.removeUsers);
             throw RetryableException.wrap("Need to retry because the user was deleted", e);
         }
 
         return null;
     }
 
-    private List<Object> buildCreateRequest(CreateGroupRequest.Builder builder, Attribute a) {
-        List<Object> users = null;
-        switch (a.getName()) {
-            case "__UID__":
-            case "__NAME__":
-                builder.groupName(AttributeUtil.getAsStringValue(a));
-                break;
-            case ATTR_DESCRIPTION:
-                builder.description(AttributeUtil.getAsStringValue(a));
-                break;
-            case ATTR_PRECEDENCE:
-                builder.precedence(AttributeUtil.getIntegerValue(a));
-                break;
-            case ATTR_ROLE_ARN:
-                builder.roleArn(AttributeUtil.getAsStringValue(a));
-                break;
-            case ATTR_USERS:
-                users = a.getValue();
-                break;
-        }
-        return users;
-    }
+    private class GroupModel {
+        String groupName;
+        String description;
+        Integer precedence;
+        String roleArn;
+        List<Object> addUsers;
+        List<Object> removeUsers;
 
-    private List<Object> buildAddValue(UpdateGroupRequest.Builder request, AttributeDelta delta) {
-        List<Object> users = null;
-        switch (delta.getName()) {
-            case ATTR_DESCRIPTION:
-                request.description(AttributeDeltaUtil.getAsStringValue(delta));
-                break;
-            case ATTR_PRECEDENCE:
-                request.precedence(AttributeDeltaUtil.getIntegerValue(delta));
-                break;
-            case ATTR_ROLE_ARN:
-                request.roleArn(AttributeDeltaUtil.getAsStringValue(delta));
-                break;
-            case ATTR_USERS:
-                users = delta.getValuesToAdd();
-                break;
+        public void applyGroupName(Attribute attr) {
+            this.groupName = AttributeUtil.getAsStringValue(attr);
         }
-        return users;
-    }
 
-    private List<Object> buildReplaceValue(UpdateGroupRequest.Builder request, AttributeDelta delta) {
-        List<Object> users = null;
-        switch (delta.getName()) {
-            case ATTR_DESCRIPTION:
-                request.description(AttributeDeltaUtil.getAsStringValue(delta));
-                break;
-            case ATTR_PRECEDENCE:
-                request.precedence(AttributeDeltaUtil.getIntegerValue(delta));
-                break;
-            case ATTR_ROLE_ARN:
-                request.roleArn(AttributeDeltaUtil.getAsStringValue(delta));
-                break;
-            case ATTR_USERS:
-                users = delta.getValuesToReplace();
-                break;
+        void applyDescription(Attribute attr) {
+            this.description = AttributeUtil.getAsStringValue(attr);
         }
-        return users;
-    }
 
-    private List<Object> buildDeleteValue(UpdateGroupRequest.Builder request, AttributeDelta delta) {
-        List<Object> users = null;
-        switch (delta.getName()) {
-            case ATTR_DESCRIPTION:
+        void applyDescription(AttributeDelta delta) {
+            if (delta.getValuesToReplace().isEmpty()) {
                 // Description is removed if we set ""
-                request.description("");
-                break;
-            case ATTR_PRECEDENCE:
-                // Precedence is removed if we set 0
-                request.precedence(0);
-                break;
-            case ATTR_ROLE_ARN:
-                // RoleArn is removed if we set ""
-                request.roleArn("");
-                break;
-            case ATTR_USERS:
-                users = delta.getValuesToRemove();
-                break;
+                this.description = "";
+            } else {
+                this.description = AttributeDeltaUtil.getAsStringValue(delta);
+            }
         }
-        return users;
+
+        void applyPrecedence(Attribute attr) {
+            this.precedence = AttributeUtil.getIntegerValue(attr);
+        }
+
+        void applyPrecedence(AttributeDelta delta) {
+            if (delta.getValuesToReplace().isEmpty()) {
+                // Precedence is removed if we set 0
+                this.precedence = 0;
+            } else {
+                this.precedence = AttributeDeltaUtil.getIntegerValue(delta);
+            }
+        }
+
+        void applyRoleArn(Attribute attr) {
+            this.roleArn = AttributeUtil.getAsStringValue(attr);
+        }
+
+        void applyRoleArn(AttributeDelta delta) {
+            if (delta.getValuesToReplace().isEmpty()) {
+                // RoleArn is removed if we set ""
+                this.roleArn = "";
+            } else {
+                this.roleArn = AttributeDeltaUtil.getAsStringValue(delta);
+            }
+        }
+
+        void applyUsers(Attribute attr) {
+            this.addUsers.addAll(attr.getValue());
+        }
+
+        void applyUsers(AttributeDelta delta) {
+            if (delta.getValuesToAdd() != null) {
+                this.addUsers.addAll(delta.getValuesToAdd());
+            }
+            if (delta.getValuesToRemove() != null) {
+                this.removeUsers.addAll(delta.getValuesToRemove());
+            }
+        }
     }
 
     /**

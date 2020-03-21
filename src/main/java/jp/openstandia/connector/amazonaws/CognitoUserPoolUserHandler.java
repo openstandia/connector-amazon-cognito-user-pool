@@ -205,14 +205,19 @@ public class CognitoUserPoolUserHandler {
         for (Attribute attr : attributes) {
             if (attr.getName().equals(Name.NAME)) {
                 newUser.applyUsername(attr);
+
             } else if (attr.getName().equals(ENABLE_NAME)) {
                 newUser.applyUserEnabled(attr);
+
             } else if (attr.getName().equals(OperationalAttributes.PASSWORD_NAME)) {
                 newUser.applyNewPassword(attr);
+
             } else if (attr.getName().equals(ATTR_PASSWORD_PERMANENT)) {
                 newUser.applyPasswordPermanent(attr);
+
             } else if (attr.getName().equals(ATTR_GROUPS)) {
                 newUser.applyGroups(attr);
+
             } else {
                 if (!schema.containsKey(attr.getName())) {
                     throw new InvalidAttributeValueException(String.format("Cognito doesn't support to set '%s' attribute of User",
@@ -349,13 +354,6 @@ public class CognitoUserPoolUserHandler {
         return null;
     }
 
-    private void invalidSchema(String name) throws InvalidAttributeValueException {
-        InvalidAttributeValueException exception = new InvalidAttributeValueException(
-                String.format("Cognito doesn't support to modify '%s' attribute of User", name));
-        exception.setAffectedAttributeNames(Arrays.asList(name));
-        throw exception;
-    }
-
     private class UserModel {
         String username = null;
         Boolean userEnabled = null;
@@ -407,15 +405,15 @@ public class CognitoUserPoolUserHandler {
         }
 
         void applyGroups(Attribute attr) {
-            addGroups.addAll(attr.getValue());
+            this.addGroups.addAll(attr.getValue());
         }
 
         void applyGroups(AttributeDelta delta) {
             if (delta.getValuesToAdd() != null) {
-                addGroups.addAll(delta.getValuesToAdd());
+                this.addGroups.addAll(delta.getValuesToAdd());
             }
             if (delta.getValuesToRemove() != null) {
-                removeGroups.addAll(delta.getValuesToRemove());
+                this.removeGroups.addAll(delta.getValuesToRemove());
             }
         }
     }
