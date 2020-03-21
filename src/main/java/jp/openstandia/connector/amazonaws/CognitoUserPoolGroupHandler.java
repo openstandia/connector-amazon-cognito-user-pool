@@ -170,6 +170,57 @@ public class CognitoUserPoolGroupHandler {
         return newUid;
     }
 
+    public Set<AttributeDelta> updateDelta(Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
+        UpdateGroupRequest.Builder request = UpdateGroupRequest.builder()
+                .userPoolId(configuration.getUserPoolID())
+                .groupName(uid.getUidValue());
+
+        List<Object> addUsers = null;
+        List<Object> removeUsers = null;
+
+        for (AttributeDelta delta : modifications) {
+            if (delta.getValuesToAdd() != null) {
+                addUsers = buildAddValue(request, delta);
+            } else if (delta.getValuesToRemove() != null) {
+                removeUsers = buildDeleteValue(request, delta);
+            } else if (delta.getValuesToReplace() != null) {
+                buildReplaceValue(request, delta);
+            }
+        }
+
+        UpdateGroupRequest req = request.build();
+
+        if (req.description() != null ||
+                req.precedence() != null ||
+                req.roleArn() != null) {
+            try {
+                UpdateGroupResponse result = client.updateGroup(req);
+
+                checkCognitoResult(result, "UpdateGroup");
+            } catch (ResourceNotFoundException e) {
+                LOGGER.warn("Not found group when updating. uid: {0}", uid);
+                throw new UnknownUidException(uid, GROUP_OBJECT_CLASS);
+            }
+        }
+
+        // We need to call another API to add/remove user for this group.
+        // It means that we can't execute this update as a single transaction.
+        // Therefore, Cognito data may be inconsistent if below calling is failed.
+        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
+        try {
+            userGroupHandler.updateUsersToGroup(uid, addUsers, removeUsers);
+        } catch (ResourceNotFoundException e) {
+            LOGGER.warn(e, "Not found group when updating. uid: {0}", uid);
+            throw new UnknownUidException(uid, GROUP_OBJECT_CLASS);
+        } catch (UserNotFoundException e) {
+            LOGGER.warn(e, "Not found the user when updating. uid: {0}, addUsers: {1}, removeUsers: {2}",
+                    uid, addUsers, removeUsers);
+            throw RetryableException.wrap("Need to retry because the user was deleted", e);
+        }
+
+        return null;
+    }
+
     /**
      * The spec for UpdateGroup:
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_UpdateGroup.html
@@ -252,6 +303,44 @@ public class CognitoUserPoolGroupHandler {
         return users;
     }
 
+    private List<Object> buildAddValue(UpdateGroupRequest.Builder request, AttributeDelta delta) {
+        List<Object> users = null;
+        switch (delta.getName()) {
+            case ATTR_DESCRIPTION:
+                request.description(AttributeDeltaUtil.getAsStringValue(delta));
+                break;
+            case ATTR_PRECEDENCE:
+                request.precedence(AttributeDeltaUtil.getIntegerValue(delta));
+                break;
+            case ATTR_ROLE_ARN:
+                request.roleArn(AttributeDeltaUtil.getAsStringValue(delta));
+                break;
+            case ATTR_USERS:
+                users = delta.getValuesToAdd();
+                break;
+        }
+        return users;
+    }
+
+    private List<Object> buildReplaceValue(UpdateGroupRequest.Builder request, AttributeDelta delta) {
+        List<Object> users = null;
+        switch (delta.getName()) {
+            case ATTR_DESCRIPTION:
+                request.description(AttributeDeltaUtil.getAsStringValue(delta));
+                break;
+            case ATTR_PRECEDENCE:
+                request.precedence(AttributeDeltaUtil.getIntegerValue(delta));
+                break;
+            case ATTR_ROLE_ARN:
+                request.roleArn(AttributeDeltaUtil.getAsStringValue(delta));
+                break;
+            case ATTR_USERS:
+                users = delta.getValuesToReplace();
+                break;
+        }
+        return users;
+    }
+
     private List<Object> buildReplaceValue(UpdateGroupRequest.Builder request, Attribute a) {
         List<Object> users = null;
         switch (a.getName()) {
@@ -266,6 +355,28 @@ public class CognitoUserPoolGroupHandler {
                 break;
             case ATTR_USERS:
                 users = a.getValue();
+                break;
+        }
+        return users;
+    }
+
+    private List<Object> buildDeleteValue(UpdateGroupRequest.Builder request, AttributeDelta delta) {
+        List<Object> users = null;
+        switch (delta.getName()) {
+            case ATTR_DESCRIPTION:
+                // Description is removed if we set ""
+                request.description("");
+                break;
+            case ATTR_PRECEDENCE:
+                // Precedence is removed if we set 0
+                request.precedence(0);
+                break;
+            case ATTR_ROLE_ARN:
+                // RoleArn is removed if we set ""
+                request.roleArn("");
+                break;
+            case ATTR_USERS:
+                users = delta.getValuesToRemove();
                 break;
         }
         return users;

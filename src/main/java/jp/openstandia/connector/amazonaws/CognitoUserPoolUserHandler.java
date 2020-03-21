@@ -276,6 +276,93 @@ public class CognitoUserPoolUserHandler {
         });
     }
 
+    public Set<AttributeDelta> updateDelta(Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
+        Name name = resolveName(uid, options);
+
+        Collection<AttributeType> updateAttrs = new ArrayList<>();
+//        Collection<String> deleteAttrs = new ArrayList<>();
+
+        Boolean userEnabled = null;
+        GuardedString newPassword = null;
+        Boolean passwordPermanent = null;
+        List<Object> addGroups = null;
+        List<Object> removeGroups = null;
+
+        for (AttributeDelta delta : modifications) {
+            if (delta.getValuesToAdd() != null) {
+                if (addGroups == null) {
+                    addGroups = delta.getValuesToAdd();
+                } else {
+                    addGroups.addAll(delta.getValuesToAdd());
+                }
+            }
+
+            if (delta.getValuesToRemove() != null) {
+                if (removeGroups == null) {
+                    removeGroups = delta.getValuesToRemove();
+                } else {
+                    removeGroups.addAll(delta.getValuesToRemove());
+                }
+            }
+
+            if (delta.getValuesToReplace() != null) {
+                // When the IDM decided to delete the attribute, the value is empty
+                if (delta.getValuesToReplace().isEmpty()) {
+//                    if (attr.getName().equals(ATTR_GROUPS)) {
+//                        groups = Collections.EMPTY_LIST;
+//                    } else {
+                        updateAttrs.add(toCognitoAttributeForDelete(delta));
+//                    }
+                } else if (delta.getName().equals(OperationalAttributes.ENABLE_NAME)) {
+                    userEnabled = AttributeDeltaUtil.getBooleanValue(delta);
+                } else if (delta.getName().equals(OperationalAttributes.PASSWORD_NAME)) {
+                    newPassword = AttributeDeltaUtil.getGuardedStringValue(delta);
+                } else if (delta.getName().equals(ATTR_PASSWORD_PERMANENT)) {
+                    passwordPermanent = AttributeDeltaUtil.getBooleanValue(delta);
+                } else {
+                    updateAttrs.add(toCognitoAttribute(schema, delta));
+                }
+            }
+        }
+
+        if (updateAttrs.size() > 0) {
+            AdminUpdateUserAttributesRequest.Builder request = AdminUpdateUserAttributesRequest.builder()
+                    .userPoolId(configuration.getUserPoolID())
+                    .username(name.getNameValue())
+                    .userAttributes(updateAttrs);
+            try {
+                AdminUpdateUserAttributesResponse result = client.adminUpdateUserAttributes(request.build());
+
+                checkCognitoResult(result, "AdminUpdateUserAttributes");
+            } catch (UserNotFoundException e) {
+                LOGGER.warn("Not found user when deleting. uid: {0}", uid);
+                throw new UnknownUidException(uid, USER_OBJECT_CLASS);
+            }
+        }
+
+        // We need to call another API to enable/disable user, password changing and add/remove group for this user.
+        // It means that we can't execute this operation as a single transaction.
+        // Therefore, Cognito data may be inconsistent if below callings are failed.
+        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
+        enableOrDisableUser(uid, name, userEnabled);
+        updatePassword(name.getNameValue(), newPassword, passwordPermanent);
+        userGroupHandler.updateGroupsToUser(name, addGroups, removeGroups);
+
+        return null;
+    }
+
+    private List<Object> buildReplaceValue(Collection<AttributeType> updateAttrs, AttributeDelta delta) {
+        return null;
+    }
+
+    private List<Object> buildRemoveValue(List<Object> removeGroups, AttributeDelta delta) {
+        return null;
+    }
+
+    private List<Object> buildAddValue(List<Object> addGroups, AttributeDelta delta) {
+        return null;
+    }
+
     /**
      * The spec for AdminUpdateUserAttributes:
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUpdateUserAttributes.html

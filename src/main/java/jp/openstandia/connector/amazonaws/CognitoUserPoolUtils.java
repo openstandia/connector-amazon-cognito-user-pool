@@ -71,6 +71,13 @@ public class CognitoUserPoolUtils {
         return AttributeBuilder.build(a.name(), a.value());
     }
 
+    public static AttributeType toCognitoAttribute(Map<String, AttributeInfo> schema, AttributeDelta delta) {
+        return AttributeType.builder()
+                .name(delta.getName())
+                .value(toCognitoValue(schema, delta))
+                .build();
+    }
+
     /**
      * Transform a Connector attribute object to a Cognito attribute object.
      *
@@ -83,6 +90,28 @@ public class CognitoUserPoolUtils {
                 .name(attr.getName())
                 .value(toCognitoValue(schema, attr))
                 .build();
+    }
+
+    private static String toCognitoValue(Map<String, AttributeInfo> schema, AttributeDelta delta) {
+        // The key of the schema is escaped key
+        AttributeInfo attributeInfo = schema.get(delta.getName());
+        if (attributeInfo == null) {
+            throw new InvalidAttributeValueException("Invalid attribute. name: " + delta.getName());
+        }
+
+        if (attributeInfo.getType() == Integer.class) {
+            return AttributeDeltaUtil.getAsStringValue(delta);
+        }
+        if (attributeInfo.getType() == ZonedDateTime.class) {
+            // The format must be YYYY-MM-DD in cognito
+            ZonedDateTime date = (ZonedDateTime) AttributeDeltaUtil.getSingleValue(delta);
+            return date.format(DateTimeFormatter.ISO_LOCAL_DATE);
+        }
+        if (attributeInfo.getType() == Boolean.class) {
+            return AttributeDeltaUtil.getAsStringValue(delta);
+        }
+
+        return AttributeDeltaUtil.getAsStringValue(delta);
     }
 
     private static String toCognitoValue(Map<String, AttributeInfo> schema, Attribute attr) {
@@ -105,6 +134,14 @@ public class CognitoUserPoolUtils {
         }
 
         return AttributeUtil.getAsStringValue(attr);
+    }
+
+    public static AttributeType toCognitoAttributeForDelete(AttributeDelta delta) {
+        // Cognito deletes the attribute when updating the value with ""
+        return AttributeType.builder()
+                .name(delta.getName())
+                .value("")
+                .build();
     }
 
     /**

@@ -42,6 +42,15 @@ public class CognitoUserPoolAssociationHandler {
         this.client = client;
     }
 
+    public void updateGroupsToUser(Name name, List<Object> addGroups, List<Object> removeGroups) {
+        if (addGroups != null) {
+            addGroups.stream().forEach(g -> addUserToGroup(name.getNameValue(), g.toString()));
+        }
+        if (removeGroups != null) {
+            removeGroups.stream().forEach(g -> removeUserFromGroup(name.getNameValue(), g.toString()));
+        }
+    }
+
     public void updateGroupsToUser(Name name, List<Object> addGroups) {
         if (addGroups == null) {
             return;
@@ -59,6 +68,15 @@ public class CognitoUserPoolAssociationHandler {
 
         // Add groups to the user
         addGroupsSet.forEach(g -> addUserToGroup(name.getNameValue(), g));
+    }
+
+    public void updateUsersToGroup(Uid groupUid, List<Object> addUsers, List<Object> removeUsers) {
+        if (addUsers != null) {
+            addUsers.stream().forEach(u -> addUserToGroup(u.toString(), groupUid.getUidValue()));
+        }
+        if (removeUsers != null) {
+            removeUsers.stream().forEach(u -> removeUserFromGroup(u.toString(), groupUid.getUidValue()));
+        }
     }
 
     public void updateUsersToGroup(Uid groupUid, List<Object> addUsers) {
@@ -113,6 +131,7 @@ public class CognitoUserPoolAssociationHandler {
         });
         return users;
     }
+
 
     private interface UserHandler {
         void handle(UserType user);

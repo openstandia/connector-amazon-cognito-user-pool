@@ -45,7 +45,7 @@ import static jp.openstandia.connector.amazonaws.CognitoUserPoolGroupHandler.GRO
 import static jp.openstandia.connector.amazonaws.CognitoUserPoolUserHandler.USER_OBJECT_CLASS;
 
 @ConnectorClass(configurationClass = CognitoUserPoolConfiguration.class, displayNameKey = "NRI OpenStandia Amazon Cognito User Pool Connector")
-public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
+public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, UpdateDeltaOp, UpdateOp, DeleteOp, SchemaOp, TestOp, SearchOp<CognitoUserPoolFilter>, InstanceNameAware {
 
     private static final Log LOG = Log.getLog(CognitoUserPoolConnector.class);
 
@@ -174,6 +174,20 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
         } else {
             throw new UnsupportedOperationException("Unsupported object class " + objectClass);
         }
+    }
+
+    @Override
+    public Set<AttributeDelta> updateDelta(ObjectClass objectClass, Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
+        if (objectClass.equals(USER_OBJECT_CLASS)) {
+            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
+            return usersHandler.updateDelta(uid, modifications, options);
+
+        } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
+            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
+            return groupsHandler.updateDelta(uid, modifications, options);
+        }
+
+        throw new UnsupportedOperationException("Unsupported object class " + objectClass);
     }
 
     @Override
