@@ -6,7 +6,9 @@ import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.http.SdkHttpResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
+import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListGroupsIterable;
 import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListUsersInGroupIterable;
+import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListUsersIterable;
 
 import java.util.function.Function;
 
@@ -16,6 +18,7 @@ public class MockClient implements CognitoIdentityProviderClient {
 
     public boolean closed = false;
 
+    // User
     private Function<AdminCreateUserRequest, AdminCreateUserResponse> adminCreateUser;
     private Function<AdminEnableUserRequest, AdminEnableUserResponse> adminEnableUser;
     private Function<AdminDisableUserRequest, AdminDisableUserResponse> adminDisableUser;
@@ -25,11 +28,22 @@ public class MockClient implements CognitoIdentityProviderClient {
     private Function<AdminAddUserToGroupRequest, AdminAddUserToGroupResponse> adminAddUserToGroup;
     private Function<AdminRemoveUserFromGroupRequest, AdminRemoveUserFromGroupResponse> adminRemoveUserFromGroup;
 
+    // Group
     private Function<CreateGroupRequest, CreateGroupResponse> createGroup;
     private Function<UpdateGroupRequest, UpdateGroupResponse> updateGroup;
     private Function<DeleteGroupRequest, DeleteGroupResponse> deleteGroup;
-    private Function<ListUsersInGroupRequest, ListUsersInGroupIterable> listUsersInGroupPaginator;
     private Function<ListUsersInGroupRequest, ListUsersInGroupResponse> listUsersInGroup;
+    private Function<ListUsersInGroupRequest, ListUsersInGroupIterable> listUsersInGroupPaginator;
+
+    // executeQuery
+    // User
+    private Function<AdminGetUserRequest, AdminGetUserResponse> adminGetUser;
+    private Function<ListUsersRequest, ListUsersResponse> listUsers;
+    private Function<ListUsersRequest, ListUsersIterable> listUsersPaginator;
+    // Group
+    private Function<GetGroupRequest, GetGroupResponse> getGroup;
+    private Function<ListGroupsRequest, ListGroupsResponse> listGroups;
+    private Function<ListGroupsRequest, ListGroupsIterable> listGroupsPaginator;
 
     public void init() {
         closed = false;
@@ -41,6 +55,20 @@ public class MockClient implements CognitoIdentityProviderClient {
         adminDeleteUser = null;
         adminAddUserToGroup = null;
         adminRemoveUserFromGroup = null;
+
+        createGroup = null;
+        updateGroup= null;
+        deleteGroup = null;
+        listUsersInGroup = null;
+        listUsersInGroupPaginator = null;
+
+        adminGetUser = null;
+        listUsers = null;
+        listUsersPaginator = null;
+
+        getGroup = null;
+        listGroups = null;
+        listGroupsPaginator = null;
     }
 
     private MockClient() {
@@ -213,6 +241,15 @@ public class MockClient implements CognitoIdentityProviderClient {
     }
 
     @Override
+    public ListUsersInGroupResponse listUsersInGroup(ListUsersInGroupRequest request) throws AwsServiceException, SdkClientException {
+        return listUsersInGroup.apply(request);
+    }
+
+    public void listUsersInGroup(Function<ListUsersInGroupRequest, ListUsersInGroupResponse> mock) {
+        this.listUsersInGroup = mock;
+    }
+
+    @Override
     public ListUsersInGroupIterable listUsersInGroupPaginator(ListUsersInGroupRequest request) throws AwsServiceException, SdkClientException {
         return listUsersInGroupPaginator.apply(request);
     }
@@ -222,11 +259,56 @@ public class MockClient implements CognitoIdentityProviderClient {
     }
 
     @Override
-    public ListUsersInGroupResponse listUsersInGroup(ListUsersInGroupRequest request) throws AwsServiceException, SdkClientException {
-        return listUsersInGroup.apply(request);
+    public AdminGetUserResponse adminGetUser(AdminGetUserRequest request) throws AwsServiceException, SdkClientException {
+        return adminGetUser.apply(request);
     }
 
-    public void listUsersInGroup(Function<ListUsersInGroupRequest, ListUsersInGroupResponse> mock) {
-        this.listUsersInGroup = mock;
+    public void adminGetUser(Function<AdminGetUserRequest, AdminGetUserResponse> mock) {
+        this.adminGetUser = mock;
+    }
+
+    @Override
+    public ListUsersResponse listUsers(ListUsersRequest request) throws AwsServiceException, SdkClientException {
+        return listUsers.apply(request);
+    }
+
+    public void listUsers(Function<ListUsersRequest, ListUsersResponse> mock) {
+        this.listUsers = mock;
+    }
+
+    @Override
+    public ListUsersIterable listUsersPaginator(ListUsersRequest request) throws AwsServiceException, SdkClientException {
+        return listUsersPaginator.apply(request);
+    }
+
+    public void listUsersPaginator(Function<ListUsersRequest, ListUsersIterable> mock) {
+        this.listUsersPaginator = mock;
+    }
+
+    @Override
+    public GetGroupResponse getGroup(GetGroupRequest request) throws AwsServiceException, SdkClientException {
+        return getGroup.apply(request);
+    }
+
+    public void getGroup(Function<GetGroupRequest, GetGroupResponse> mock) {
+        this.getGroup = mock;
+    }
+
+    @Override
+    public ListGroupsResponse listGroups(ListGroupsRequest request) throws AwsServiceException, SdkClientException {
+        return listGroups.apply(request);
+    }
+
+    public void listGroups(Function<ListGroupsRequest, ListGroupsResponse> mock) {
+        this.listGroups = mock;
+    }
+
+    @Override
+    public ListGroupsIterable listGroupsPaginator(ListGroupsRequest request) throws AwsServiceException, SdkClientException {
+        return listGroupsPaginator.apply(request);
+    }
+
+    public void listGroupsPaginator(Function<ListGroupsRequest, ListGroupsIterable> mock) {
+        this.listGroupsPaginator = mock;
     }
 }

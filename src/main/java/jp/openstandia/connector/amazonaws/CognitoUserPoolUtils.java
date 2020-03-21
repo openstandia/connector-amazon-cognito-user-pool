@@ -15,7 +15,6 @@
  */
 package jp.openstandia.connector.amazonaws;
 
-import org.identityconnectors.common.CollectionUtil;
 import org.identityconnectors.framework.common.exceptions.ConnectorException;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
 import org.identityconnectors.framework.common.objects.*;
@@ -28,10 +27,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Map;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 /**
  * Provides utility methods

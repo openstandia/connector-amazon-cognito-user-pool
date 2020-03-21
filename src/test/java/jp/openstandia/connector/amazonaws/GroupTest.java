@@ -9,10 +9,14 @@ import org.identityconnectors.test.common.TestHelpers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
+import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListGroupsIterable;
 import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListUsersInGroupIterable;
 
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static jp.openstandia.connector.amazonaws.MockClient.buildSuccess;
@@ -108,7 +112,7 @@ class GroupTest {
 
         mockClient.listUsersInGroup(request -> {
             ListUsersInGroupResponse.Builder builder = ListUsersInGroupResponse.builder()
-                    .users(createUserType("user", "sub", "user@example.com"));
+                    .users(newUserType("user", "sub", "user@example.com"));
             return buildSuccess(builder, ListUsersInGroupResponse.class);
         });
 
@@ -141,6 +145,77 @@ class GroupTest {
         assertEquals("user", removeUser.get(0));
     }
 
+    @Test
+    void getGroup() {
+        // Given
+        String groupName = "g1";
+        String description = "desc";
+        Integer precedence = 1;
+        String roleArn = "role";
+
+        mockClient.getGroup(request -> {
+            GetGroupResponse.Builder builer = GetGroupResponse.builder()
+                    .group(newGroupType(groupName, description, precedence, roleArn));
+
+            return buildSuccess(builer, GetGroupResponse.class);
+        });
+
+        // When
+        ConnectorObject result = connector.getObject(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS,
+                new Uid(groupName, new Name(groupName)), new OperationOptionsBuilder().build());
+
+        // Then
+        assertEquals(groupName, result.getUid().getUidValue());
+        assertEquals(groupName, result.getName().getNameValue());
+        assertNotNull(result.getAttributeByName("Description"));
+        assertEquals(description, result.getAttributeByName("Description").getValue().get(0));
+        assertNotNull(result.getAttributeByName("Precedence"));
+        assertEquals(precedence, result.getAttributeByName("Precedence").getValue().get(0));
+        assertNotNull(result.getAttributeByName("RoleArn"));
+        assertEquals(roleArn, result.getAttributeByName("RoleArn").getValue().get(0));
+    }
+
+    @Test
+    void getAllUsers() {
+        // Given
+        mockClient.listGroupsPaginator(request -> {
+            ListGroupsIterable response = new ListGroupsIterable(mockClient, request);
+            return response;
+        });
+
+        mockClient.listGroups(request -> {
+            ListGroupsResponse.Builder builer = ListGroupsResponse.builder()
+                    .groups(
+                            newGroupType("g1", "desc1", 1, "role1"),
+                            newGroupType("g2", "desc2", 2, "role2")
+                    );
+
+            return buildSuccess(builer, ListGroupsResponse.class);
+        });
+
+        // When
+        List<ConnectorObject> groups = new ArrayList<>();
+        ResultsHandler handler = connectorObject -> {
+            groups.add(connectorObject);
+            return true;
+        };
+        connector.search(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS,
+                null, handler, new OperationOptionsBuilder().build());
+
+        // Then
+        assertEquals(2, groups.size());
+        assertEquals("g1", groups.get(0).getUid().getUidValue());
+        assertEquals("g1", groups.get(0).getName().getNameValue());
+        assertEquals("desc1", groups.get(0).getAttributeByName("Description").getValue().get(0));
+        assertEquals(1, groups.get(0).getAttributeByName("Precedence").getValue().get(0));
+        assertEquals("role1", groups.get(0).getAttributeByName("RoleArn").getValue().get(0));
+        assertEquals("g2", groups.get(1).getUid().getUidValue());
+        assertEquals("g2", groups.get(1).getName().getNameValue());
+        assertEquals("desc2", groups.get(1).getAttributeByName("Description").getValue().get(0));
+        assertEquals(2, groups.get(1).getAttributeByName("Precedence").getValue().get(0));
+        assertEquals("role2", groups.get(1).getAttributeByName("RoleArn").getValue().get(0));
+    }
+
     private GroupType newGroupType(String groupName, String description, Integer precedence, String roleArn) {
         return GroupType.builder()
                 .groupName(groupName)
@@ -152,7 +227,7 @@ class GroupTest {
                 .build();
     }
 
-    private UserType createUserType(String username, String sub, String email) {
+    private UserType newUserType(String username, String sub, String email) {
         return UserType.builder()
                 .username(username)
                 .enabled(true)

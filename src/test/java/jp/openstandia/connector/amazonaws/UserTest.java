@@ -9,6 +9,7 @@ import org.identityconnectors.test.common.TestHelpers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
+import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListUsersIterable;
 
 import java.time.Instant;
 import java.util.*;
@@ -381,6 +382,81 @@ class UserTest {
         assertEquals(addGroup2, addGroup.get(1));
         assertEquals(removeGroup1, removeGroup.get(0));
         assertEquals(removeGroup2, removeGroup.get(1));
+    }
+
+    @Test
+    void getUser() {
+        // Given
+        String username = "foo";
+        String sub = "00000000-0000-0000-0000-000000000001";
+        String email = "foo@example.com";
+
+        mockClient.adminGetUser(request -> {
+            AdminGetUserResponse.Builder builer = AdminGetUserResponse.builder()
+                    .username(username)
+                    .enabled(true)
+                    .userCreateDate(Instant.now())
+                    .userLastModifiedDate(Instant.now())
+                    .userAttributes(
+                            AttributeType.builder()
+                                    .name("sub")
+                                    .value(sub)
+                                    .build(),
+                            AttributeType.builder()
+                                    .name("email")
+                                    .value(email)
+                                    .build()
+                    );
+
+            return buildSuccess(builer, AdminGetUserResponse.class);
+        });
+
+        // When
+        ConnectorObject result = connector.getObject(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
+                new Uid(sub, new Name(username)), new OperationOptionsBuilder().build());
+
+        // Then
+        assertEquals(sub, result.getUid().getUidValue());
+        assertEquals(username, result.getName().getNameValue());
+        assertNotNull(result.getAttributeByName("email"));
+        assertEquals(email, result.getAttributeByName("email").getValue().get(0));
+    }
+
+    @Test
+    void getAllUsers() {
+        // Given
+        mockClient.listUsersPaginator(request -> {
+            ListUsersIterable response = new ListUsersIterable(mockClient, request);
+            return response;
+        });
+
+        mockClient.listUsers(request -> {
+            ListUsersResponse.Builder builer = ListUsersResponse.builder()
+                    .users(
+                            newUserType("sub1", "user1", "user1@example.com"),
+                            newUserType("sub2", "user2", "user2@example.com")
+                    );
+
+            return buildSuccess(builer, ListUsersResponse.class);
+        });
+
+        // When
+        List<ConnectorObject> users = new ArrayList<>();
+        ResultsHandler handler = connectorObject -> {
+            users.add(connectorObject);
+            return true;
+        };
+        connector.search(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
+                null, handler, new OperationOptionsBuilder().build());
+
+        // Then
+        assertEquals(2, users.size());
+        assertEquals("sub1", users.get(0).getUid().getUidValue());
+        assertEquals("user1", users.get(0).getName().getNameValue());
+        assertEquals("user1@example.com", users.get(0).getAttributeByName("email").getValue().get(0));
+        assertEquals("sub2", users.get(1).getUid().getUidValue());
+        assertEquals("user2", users.get(1).getName().getNameValue());
+        assertEquals("user2@example.com", users.get(1).getAttributeByName("email").getValue().get(0));
     }
 
     private UserType newUserType(String sub, String username, String email) {
