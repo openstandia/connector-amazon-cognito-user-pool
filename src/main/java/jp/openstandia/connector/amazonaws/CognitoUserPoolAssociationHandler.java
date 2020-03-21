@@ -43,10 +43,10 @@ public class CognitoUserPoolAssociationHandler {
     }
 
     public void updateGroupsToUser(Name name, List<Object> addGroups, List<Object> removeGroups) {
-        if (addGroups != null) {
+        if (!addGroups.isEmpty()) {
             addGroups.stream().forEach(g -> addUserToGroup(name.getNameValue(), g.toString()));
         }
-        if (removeGroups != null) {
+        if (!removeGroups.isEmpty()) {
             removeGroups.stream().forEach(g -> removeUserFromGroup(name.getNameValue(), g.toString()));
         }
     }

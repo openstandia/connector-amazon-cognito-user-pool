@@ -32,6 +32,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.*;
+import static org.identityconnectors.framework.common.objects.OperationalAttributes.ENABLE_NAME;
 
 public class CognitoUserPoolUserHandler {
 
@@ -61,7 +62,11 @@ public class CognitoUserPoolUserHandler {
     private static final String ATTR_GROUPS = "groups";
 
     // Password
+    private static final String ATTR_PASSWORD = "__PASSWORD__";
     private static final String ATTR_PASSWORD_PERMANENT = "password_permanent";
+
+    // Enable
+    private static final String ATTR_ENABLE = "__ENABLE__";
 
     private static final CognitoUserPoolFilter.SubFilter SUB_FILTER = new CognitoUserPoolFilter.SubFilter();
 
@@ -206,7 +211,7 @@ public class CognitoUserPoolUserHandler {
         for (Attribute a : attributes) {
             if (a.getName().equals(Name.NAME)) {
                 request.username(AttributeUtil.getAsStringValue(a));
-            } else if (a.getName().equals(OperationalAttributes.ENABLE_NAME)) {
+            } else if (a.getName().equals(ENABLE_NAME)) {
                 userEnabled = AttributeUtil.getBooleanValue(a);
             } else if (a.getName().equals(OperationalAttributes.PASSWORD_NAME)) {
                 newPassword = AttributeUtil.getGuardedStringValue(a);
@@ -276,91 +281,43 @@ public class CognitoUserPoolUserHandler {
         });
     }
 
-    public Set<AttributeDelta> updateDelta(Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
-        Name name = resolveName(uid, options);
-
-        Collection<AttributeType> updateAttrs = new ArrayList<>();
-//        Collection<String> deleteAttrs = new ArrayList<>();
-
+    private class UserDelta {
         Boolean userEnabled = null;
         GuardedString newPassword = null;
         Boolean passwordPermanent = null;
-        List<Object> addGroups = null;
-        List<Object> removeGroups = null;
+        List<AttributeType> updateAttrs = new ArrayList<>();
+        List<Object> addGroups = new ArrayList<>();
+        List<Object> removeGroups = new ArrayList<>();
 
-        for (AttributeDelta delta : modifications) {
+        void applyUserEnabled(AttributeDelta delta) {
+            this.userEnabled = AttributeDeltaUtil.getBooleanValue(delta);
+        }
+
+        void applyNewPassword(AttributeDelta delta) {
+            this.newPassword = AttributeDeltaUtil.getGuardedStringValue(delta);
+        }
+
+        void applyPasswordPermanent(AttributeDelta delta) {
+            this.passwordPermanent = AttributeDeltaUtil.getBooleanValue(delta);
+        }
+
+        void applyUserAttribute(AttributeDelta delta) {
+            // When the IDM decided to delete the attribute, the value is empty
+            if (delta.getValuesToReplace().isEmpty()) {
+                this.updateAttrs.add(toCognitoAttributeForDelete(delta));
+            } else {
+                this.updateAttrs.add(toCognitoAttribute(schema, delta));
+            }
+        }
+
+        void applyGroups(AttributeDelta delta) {
             if (delta.getValuesToAdd() != null) {
-                if (addGroups == null) {
-                    addGroups = delta.getValuesToAdd();
-                } else {
-                    addGroups.addAll(delta.getValuesToAdd());
-                }
+                addGroups.addAll(delta.getValuesToAdd());
             }
-
             if (delta.getValuesToRemove() != null) {
-                if (removeGroups == null) {
-                    removeGroups = delta.getValuesToRemove();
-                } else {
-                    removeGroups.addAll(delta.getValuesToRemove());
-                }
-            }
-
-            if (delta.getValuesToReplace() != null) {
-                // When the IDM decided to delete the attribute, the value is empty
-                if (delta.getValuesToReplace().isEmpty()) {
-//                    if (attr.getName().equals(ATTR_GROUPS)) {
-//                        groups = Collections.EMPTY_LIST;
-//                    } else {
-                        updateAttrs.add(toCognitoAttributeForDelete(delta));
-//                    }
-                } else if (delta.getName().equals(OperationalAttributes.ENABLE_NAME)) {
-                    userEnabled = AttributeDeltaUtil.getBooleanValue(delta);
-                } else if (delta.getName().equals(OperationalAttributes.PASSWORD_NAME)) {
-                    newPassword = AttributeDeltaUtil.getGuardedStringValue(delta);
-                } else if (delta.getName().equals(ATTR_PASSWORD_PERMANENT)) {
-                    passwordPermanent = AttributeDeltaUtil.getBooleanValue(delta);
-                } else {
-                    updateAttrs.add(toCognitoAttribute(schema, delta));
-                }
+                removeGroups.addAll(delta.getValuesToRemove());
             }
         }
-
-        if (updateAttrs.size() > 0) {
-            AdminUpdateUserAttributesRequest.Builder request = AdminUpdateUserAttributesRequest.builder()
-                    .userPoolId(configuration.getUserPoolID())
-                    .username(name.getNameValue())
-                    .userAttributes(updateAttrs);
-            try {
-                AdminUpdateUserAttributesResponse result = client.adminUpdateUserAttributes(request.build());
-
-                checkCognitoResult(result, "AdminUpdateUserAttributes");
-            } catch (UserNotFoundException e) {
-                LOGGER.warn("Not found user when deleting. uid: {0}", uid);
-                throw new UnknownUidException(uid, USER_OBJECT_CLASS);
-            }
-        }
-
-        // We need to call another API to enable/disable user, password changing and add/remove group for this user.
-        // It means that we can't execute this operation as a single transaction.
-        // Therefore, Cognito data may be inconsistent if below callings are failed.
-        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
-        enableOrDisableUser(uid, name, userEnabled);
-        updatePassword(name.getNameValue(), newPassword, passwordPermanent);
-        userGroupHandler.updateGroupsToUser(name, addGroups, removeGroups);
-
-        return null;
-    }
-
-    private List<Object> buildReplaceValue(Collection<AttributeType> updateAttrs, AttributeDelta delta) {
-        return null;
-    }
-
-    private List<Object> buildRemoveValue(List<Object> removeGroups, AttributeDelta delta) {
-        return null;
-    }
-
-    private List<Object> buildAddValue(List<Object> addGroups, AttributeDelta delta) {
-        return null;
     }
 
     /**
@@ -368,51 +325,53 @@ public class CognitoUserPoolUserHandler {
      * https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUpdateUserAttributes.html
      *
      * @param uid
-     * @param replaceAttributes
+     * @param modifications
      * @param options
      * @return
      */
-    public Uid updateUser(Uid uid, Set<Attribute> replaceAttributes, OperationOptions options) {
-        if (uid == null) {
-            throw new InvalidAttributeValueException("uid not provided");
-        }
-
+    public Set<AttributeDelta> updateDelta(Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
         Name name = resolveName(uid, options);
 
-        Collection<AttributeType> updateAttrs = new ArrayList<>();
-//        Collection<String> deleteAttrs = new ArrayList<>();
+        UserDelta userDelta = new UserDelta();
 
-        Boolean userEnabled = null;
-        GuardedString newPassword = null;
-        Boolean passwordPermanent = null;
-        List<Object> groups = null;
-
-        for (Attribute attr : replaceAttributes) {
-            // When the IDM decided to delete the attribute, the value is null
-            if (attr.getValue() == null) {
-                if (attr.getName().equals(ATTR_GROUPS)) {
-                    groups = Collections.EMPTY_LIST;
-                } else {
-                    updateAttrs.add(toCognitoAttributeForDelete(attr));
+        for (AttributeDelta delta : modifications) {
+            switch (delta.getName()) {
+                case "__UID__": {
+                    throw new InvalidAttributeValueException("Cognito doesn't support to modify 'sub'");
                 }
-            } else if (attr.getName().equals(OperationalAttributes.ENABLE_NAME)) {
-                userEnabled = AttributeUtil.getBooleanValue(attr);
-            } else if (attr.getName().equals(OperationalAttributes.PASSWORD_NAME)) {
-                newPassword = AttributeUtil.getGuardedStringValue(attr);
-            } else if (attr.getName().equals(ATTR_PASSWORD_PERMANENT)) {
-                passwordPermanent = AttributeUtil.getBooleanValue(attr);
-            } else if (attr.getName().equals(ATTR_GROUPS)) {
-                groups = attr.getValue();
-            } else {
-                updateAttrs.add(toCognitoAttribute(schema, attr));
+                case "__NAME__": {
+                    throw new InvalidAttributeValueException("Cognito doesn't support to modify 'username'");
+                }
+                case ATTR_ENABLE: {
+                    userDelta.applyUserEnabled(delta);
+                    break;
+                }
+                case ATTR_PASSWORD: {
+                    userDelta.applyNewPassword(delta);
+                    break;
+                }
+                case ATTR_PASSWORD_PERMANENT: {
+                    userDelta.applyPasswordPermanent(delta);
+                    break;
+                }
+                case ATTR_GROUPS: {
+                    userDelta.applyGroups(delta);
+                }
+                default: {
+                    if (!schema.containsKey(delta.getName())) {
+                        throw new InvalidAttributeValueException(String.format("Cognito doesn't support to modify '%s'",
+                                delta.getName()));
+                    }
+                    userDelta.applyUserAttribute(delta);
+                }
             }
         }
 
-        if (updateAttrs.size() > 0) {
+        if (!userDelta.updateAttrs.isEmpty()) {
             AdminUpdateUserAttributesRequest.Builder request = AdminUpdateUserAttributesRequest.builder()
                     .userPoolId(configuration.getUserPoolID())
                     .username(name.getNameValue())
-                    .userAttributes(updateAttrs);
+                    .userAttributes(userDelta.updateAttrs);
             try {
                 AdminUpdateUserAttributesResponse result = client.adminUpdateUserAttributes(request.build());
 
@@ -427,11 +386,11 @@ public class CognitoUserPoolUserHandler {
         // It means that we can't execute this operation as a single transaction.
         // Therefore, Cognito data may be inconsistent if below callings are failed.
         // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
-        enableOrDisableUser(uid, name, userEnabled);
-        updatePassword(name.getNameValue(), newPassword, passwordPermanent);
-        userGroupHandler.updateGroupsToUser(name, groups);
+        enableOrDisableUser(uid, name, userDelta.userEnabled);
+        updatePassword(name.getNameValue(), userDelta.newPassword, userDelta.passwordPermanent);
+        userGroupHandler.updateGroupsToUser(name, userDelta.addGroups, userDelta.removeGroups);
 
-        return uid;
+        return null;
     }
 
     private void enableOrDisableUser(Uid uid, Name name, Boolean userEnabled) {
@@ -599,7 +558,7 @@ public class CognitoUserPoolUserHandler {
                 .setName(username);
 
         // Metadata
-        if (shouldReturn(attrsToGetSet, OperationalAttributes.ENABLE_NAME)) {
+        if (shouldReturn(attrsToGetSet, ENABLE_NAME)) {
             builder.addAttribute(AttributeBuilder.buildEnabled(enabled));
         }
         if (shouldReturn(attrsToGetSet, ATTR_USER_CREATE_DATE)) {
