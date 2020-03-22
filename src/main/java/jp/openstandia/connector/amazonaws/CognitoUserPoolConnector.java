@@ -135,6 +135,9 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
         ObjectClassInfo groupSchemaInfo = CognitoUserPoolGroupHandler.getGroupSchema(userPoolType);
         schemaBuilder.defineObjectClass(groupSchemaInfo);
 
+        schemaBuilder.defineOperationOption(OperationOptionInfoBuilder.buildAttributesToGet(), SearchOp.class);
+        schemaBuilder.defineOperationOption(OperationOptionInfoBuilder.buildReturnDefaultAttributes(), SearchOp.class);
+
         userSchemaMap = new HashMap<>();
         userSchemaInfo.getAttributeInfo().stream()
                 .forEach(a -> userSchemaMap.put(a.getName(), a));
