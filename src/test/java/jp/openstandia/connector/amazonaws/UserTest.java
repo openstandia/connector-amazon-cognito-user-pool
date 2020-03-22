@@ -416,6 +416,7 @@ class UserTest {
                 new Uid(sub, new Name(username)), new OperationOptionsBuilder().build());
 
         // Then
+        assertEquals(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, result.getObjectClass());
         assertEquals(sub, result.getUid().getUidValue());
         assertEquals(username, result.getName().getNameValue());
         assertNotNull(result.getAttributeByName("email"));
@@ -451,9 +452,11 @@ class UserTest {
 
         // Then
         assertEquals(2, users.size());
+        assertEquals(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, users.get(0).getObjectClass());
         assertEquals("sub1", users.get(0).getUid().getUidValue());
         assertEquals("user1", users.get(0).getName().getNameValue());
         assertEquals("user1@example.com", users.get(0).getAttributeByName("email").getValue().get(0));
+        assertEquals(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, users.get(1).getObjectClass());
         assertEquals("sub2", users.get(1).getUid().getUidValue());
         assertEquals("user2", users.get(1).getName().getNameValue());
         assertEquals("user2@example.com", users.get(1).getAttributeByName("email").getValue().get(0));

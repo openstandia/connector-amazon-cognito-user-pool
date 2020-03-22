@@ -580,6 +580,7 @@ public class CognitoUserPoolUserHandler {
         }
 
         final ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
+                .setObjectClass(USER_OBJECT_CLASS)
                 // Always returns "username"
                 .setName(username);
 
