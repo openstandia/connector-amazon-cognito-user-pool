@@ -403,19 +403,23 @@ public class CognitoUserPoolGroupHandler {
                 .setName(g.groupName());
 
         for (String getAttr : attributesToGet) {
-            switch (getAttr) {
-                case ATTR_DESCRIPTION:
-                    builder.addAttribute(ATTR_DESCRIPTION, g.description());
-                case ATTR_PRECEDENCE:
-                    builder.addAttribute(ATTR_PRECEDENCE, g.precedence());
-                case ATTR_ROLE_ARN:
-                    builder.addAttribute(ATTR_ROLE_ARN, g.roleArn());
-                case ATTR_CREATION_DATE:
-                    builder.addAttribute(ATTR_CREATION_DATE, toZoneDateTime(g.creationDate()));
-                case ATTR_LAST_MODIFIED_DATE:
-                    builder.addAttribute(ATTR_LAST_MODIFIED_DATE, toZoneDateTime(g.lastModifiedDate()));
-                case ATTR_USERS:
-                    builder.addAttribute(ATTR_USERS, userGroupHandler.getUsersInGroup(g.groupName()));
+            if (getAttr.equals(ATTR_DESCRIPTION)) {
+                builder.addAttribute(ATTR_DESCRIPTION, g.description());
+
+            } else if (getAttr.equals(ATTR_PRECEDENCE)) {
+                builder.addAttribute(ATTR_PRECEDENCE, g.precedence());
+
+            } else if (getAttr.equals(ATTR_ROLE_ARN)) {
+                builder.addAttribute(ATTR_ROLE_ARN, g.roleArn());
+
+            } else if (getAttr.equals(ATTR_CREATION_DATE)) {
+                builder.addAttribute(ATTR_CREATION_DATE, toZoneDateTime(g.creationDate()));
+
+            } else if (getAttr.equals(ATTR_LAST_MODIFIED_DATE)) {
+                builder.addAttribute(ATTR_LAST_MODIFIED_DATE, toZoneDateTime(g.lastModifiedDate()));
+
+            } else if (getAttr.equals(ATTR_USERS)) {
+                builder.addAttribute(ATTR_USERS, userGroupHandler.getUsersInGroup(g.groupName()));
             }
         }
 
@@ -425,7 +429,7 @@ public class CognitoUserPoolGroupHandler {
     private ConnectorObject toFullConnectorObject(GroupType g) {
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
                 .setObjectClass(GROUP_OBJECT_CLASS)
-                .setUid(new Uid(g.groupName(), g.groupName()))
+                .setUid(new Uid(g.groupName(), new Name(g.groupName())))
                 .setName(g.groupName())
                 .addAttribute(ATTR_DESCRIPTION, g.description())
                 .addAttribute(ATTR_PRECEDENCE, g.precedence())

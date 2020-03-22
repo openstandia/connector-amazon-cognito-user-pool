@@ -167,12 +167,50 @@ class GroupTest {
         assertEquals(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS, result.getObjectClass());
         assertEquals(groupName, result.getUid().getUidValue());
         assertEquals(groupName, result.getName().getNameValue());
+        assertNotNull(result.getAttributeByName("CreationDate"));
+        assertNotNull(result.getAttributeByName("LastModifiedDate"));
         assertNotNull(result.getAttributeByName("Description"));
         assertEquals(description, result.getAttributeByName("Description").getValue().get(0));
         assertNotNull(result.getAttributeByName("Precedence"));
         assertEquals(precedence, result.getAttributeByName("Precedence").getValue().get(0));
         assertNotNull(result.getAttributeByName("RoleArn"));
         assertEquals(roleArn, result.getAttributeByName("RoleArn").getValue().get(0));
+    }
+
+    @Test
+    void getGroupWithAttributesToGet() {
+        // Given
+        String groupName = "g1";
+        String description = "desc";
+        Integer precedence = 1;
+        String roleArn = "role";
+
+        mockClient.getGroup(request -> {
+            GetGroupResponse.Builder builer = GetGroupResponse.builder()
+                    .group(newGroupType(groupName, description, precedence, roleArn));
+
+            return buildSuccess(builer, GetGroupResponse.class);
+        });
+        OperationOptions options = new OperationOptionsBuilder()
+                .setAttributesToGet(
+                        Uid.NAME,
+                        Name.NAME,
+                        "CreationDate"
+                ).build();
+
+        // When
+        ConnectorObject result = connector.getObject(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS,
+                new Uid(groupName, new Name(groupName)), options);
+
+        // Then
+        assertEquals(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS, result.getObjectClass());
+        assertEquals(3, result.getAttributes().size());
+        assertEquals(groupName, result.getUid().getUidValue());
+        assertEquals(groupName, result.getName().getNameValue());
+        assertNotNull(result.getAttributeByName("CreationDate"));
+        assertNull(result.getAttributeByName("Description"));
+        assertNull(result.getAttributeByName("Precedence"));
+        assertNull(result.getAttributeByName("RoleArn"));
     }
 
     @Test

@@ -424,6 +424,51 @@ class UserTest {
     }
 
     @Test
+    void getUserWithAttributesToGet() {
+        // Given
+        String username = "foo";
+        String sub = "00000000-0000-0000-0000-000000000001";
+        String email = "foo@example.com";
+
+        mockClient.adminGetUser(request -> {
+            AdminGetUserResponse.Builder builer = AdminGetUserResponse.builder()
+                    .username(username)
+                    .enabled(true)
+                    .userCreateDate(Instant.now())
+                    .userLastModifiedDate(Instant.now())
+                    .userAttributes(
+                            AttributeType.builder()
+                                    .name("sub")
+                                    .value(sub)
+                                    .build(),
+                            AttributeType.builder()
+                                    .name("email")
+                                    .value(email)
+                                    .build()
+                    );
+
+            return buildSuccess(builer, AdminGetUserResponse.class);
+        });
+        OperationOptions options = new OperationOptionsBuilder()
+                .setAttributesToGet(
+                        Uid.NAME,
+                        Name.NAME,
+                        "UserCreateDate"
+                ).build();
+
+        // When
+        ConnectorObject result = connector.getObject(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
+                new Uid(sub, new Name(username)), options);
+
+        // Then
+        assertEquals(3, result.getAttributes().size());
+        assertEquals(sub, result.getUid().getUidValue());
+        assertEquals(username, result.getName().getNameValue());
+        assertNull(result.getAttributeByName("email"));
+        assertNotNull(result.getAttributeByName("UserCreateDate"));
+    }
+
+    @Test
     void getAllUsers() {
         // Given
         mockClient.listUsersPaginator(request -> {
