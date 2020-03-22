@@ -164,6 +164,7 @@ class GroupTest {
                 new Uid(groupName, new Name(groupName)), new OperationOptionsBuilder().build());
 
         // Then
+        assertEquals(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS, result.getObjectClass());
         assertEquals(groupName, result.getUid().getUidValue());
         assertEquals(groupName, result.getName().getNameValue());
         assertNotNull(result.getAttributeByName("Description"));
@@ -203,11 +204,13 @@ class GroupTest {
 
         // Then
         assertEquals(2, groups.size());
+        assertEquals(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS, groups.get(0).getObjectClass());
         assertEquals("g1", groups.get(0).getUid().getUidValue());
         assertEquals("g1", groups.get(0).getName().getNameValue());
         assertEquals("desc1", groups.get(0).getAttributeByName("Description").getValue().get(0));
         assertEquals(1, groups.get(0).getAttributeByName("Precedence").getValue().get(0));
         assertEquals("role1", groups.get(0).getAttributeByName("RoleArn").getValue().get(0));
+        assertEquals(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS, groups.get(1).getObjectClass());
         assertEquals("g2", groups.get(1).getUid().getUidValue());
         assertEquals("g2", groups.get(1).getName().getNameValue());
         assertEquals("desc2", groups.get(1).getAttributeByName("Description").getValue().get(0));
