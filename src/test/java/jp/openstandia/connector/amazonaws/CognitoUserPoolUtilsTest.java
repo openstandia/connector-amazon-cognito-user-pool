@@ -108,12 +108,12 @@ class CognitoUserPoolUtilsTest {
     @Test
     void shouldReturnPartialAttributeValues() {
         OperationOptions noOptions = new OperationOptionsBuilder().build();
-        assertFalse(CognitoUserPoolUtils.shouldReturnPartialAttributeValues(noOptions));
+        assertFalse(CognitoUserPoolUtils.shouldAllowPartialAttributeValues(noOptions));
 
         OperationOptions falseOption = new OperationOptionsBuilder().setAllowPartialAttributeValues(false).build();
-        assertFalse(CognitoUserPoolUtils.shouldReturnPartialAttributeValues(falseOption));
+        assertFalse(CognitoUserPoolUtils.shouldAllowPartialAttributeValues(falseOption));
 
         OperationOptions trueOption = new OperationOptionsBuilder().setAllowPartialAttributeValues(true).build();
-        assertTrue(CognitoUserPoolUtils.shouldReturnPartialAttributeValues(trueOption));
+        assertTrue(CognitoUserPoolUtils.shouldAllowPartialAttributeValues(trueOption));
     }
 }

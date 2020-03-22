@@ -29,7 +29,6 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static jp.openstandia.connector.amazonaws.CognitoUserPoolUtils.*;
 import static org.identityconnectors.framework.common.objects.OperationalAttributes.ENABLE_NAME;
@@ -69,6 +68,22 @@ public class CognitoUserPoolUserHandler {
     private static final String ATTR_ENABLE = "__ENABLE__";
 
     private static final CognitoUserPoolFilter.SubFilter SUB_FILTER = new CognitoUserPoolFilter.SubFilter();
+
+    private static final Set<String> NOT_USER_ATTRIBUTES = createNotUserAttributes();
+
+    private static Set<String> createNotUserAttributes() {
+        Set<String> attrs = new HashSet<>();
+        attrs.add(Uid.NAME);
+        attrs.add(Name.NAME);
+        attrs.add(ATTR_USER_CREATE_DATE);
+        attrs.add(ATTR_USER_LAST_MODIFIED_DATE);
+        attrs.add(ATTR_USER_STATUS);
+        attrs.add(ATTR_GROUPS);
+        attrs.add(ATTR_PASSWORD_PERMANENT);
+        attrs.addAll(OperationalAttributes.OPERATIONAL_ATTRIBUTE_NAMES);
+
+        return Collections.unmodifiableSet(attrs);
+    }
 
     private final CognitoUserPoolConfiguration configuration;
     private final CognitoIdentityProviderClient client;
@@ -126,9 +141,10 @@ public class CognitoUserPoolUserHandler {
         List<AttributeInfo> attrInfoList = userPoolType.schemaAttributes().stream()
                 .filter(a -> !a.name().equals(ATTR_SUB))
                 .map(s -> {
-                    AttributeInfoBuilder attrInfo = AttributeInfoBuilder.define(s.name());
-                    attrInfo.setRequired(s.required());
-                    attrInfo.setUpdateable(s.mutable());
+                    AttributeInfoBuilder attrInfo = AttributeInfoBuilder.define(s.name())
+                            .setRequired(s.required())
+                            .setUpdateable(s.mutable())
+                            .setReturnedByDefault(true);
 
                     // https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SchemaAttributeType.html#CognitoUserPools-Type-SchemaAttributeType-AttributeDataType
                     switch (s.attributeDataType()) {
@@ -530,8 +546,12 @@ public class CognitoUserPoolUserHandler {
     }
 
     public void getUsers(CognitoUserPoolFilter filter, ResultsHandler resultsHandler, OperationOptions options) {
+        // Create full attributesToGet by RETURN_DEFAULT_ATTRIBUTES + ATTRIBUTES_TO_GET
+        Set<String> attributesToGet = createFullAttributesToGet(schema, options);
+        boolean allowPartialAttributeValues = shouldAllowPartialAttributeValues(options);
+
         if (filter != null && filter.isByName()) {
-            getUserByName(filter.attributeValue, resultsHandler, options);
+            getUserByName(filter.attributeValue, resultsHandler, attributesToGet, allowPartialAttributeValues);
             return;
         }
 
@@ -541,25 +561,33 @@ public class CognitoUserPoolUserHandler {
             request.filter(filter.toFilterString(schema));
         }
 
-        // TODO: filter attributes natively
+        if (attributesToGet != null && !attributesToGet.isEmpty()) {
+            String[] filtered = attributesToGet.stream()
+                    .filter(a -> isUserAttributes(a))
+                    .toArray(String[]::new);
+            if (filtered.length > 0) {
+                request.attributesToGet(filtered);
+            }
+        }
         ListUsersIterable result = client.listUsersPaginator(request.build());
 
-        result.forEach(r -> r.users().forEach(u -> resultsHandler.handle(toConnectorObject(u, options))));
+        result.forEach(r -> r.users().forEach(u -> resultsHandler.handle(toConnectorObject(u, attributesToGet, allowPartialAttributeValues))));
     }
 
-    private void getUserByName(String username, ResultsHandler resultsHandler, OperationOptions options) {
+
+    private void getUserByName(String username, ResultsHandler resultsHandler, Set<String> attributesToGet, boolean allowPartialAttributeValues) {
         AdminGetUserResponse result = findUserByName(username);
-        resultsHandler.handle(toConnectorObject(result, options));
+        resultsHandler.handle(toConnectorObject(result, attributesToGet, allowPartialAttributeValues));
     }
 
-    private ConnectorObject toConnectorObject(AdminGetUserResponse result, OperationOptions options) {
+    private ConnectorObject toConnectorObject(AdminGetUserResponse result, Set<String> attributesToGet, boolean allowPartialAttributeValues) {
         return toConnectorObject(result.username(), result.enabled(), result.userCreateDate(), result.userLastModifiedDate(),
-                result.userStatusAsString(), result.userAttributes(), options);
+                result.userStatusAsString(), result.userAttributes(), attributesToGet, allowPartialAttributeValues);
     }
 
-    private ConnectorObject toConnectorObject(UserType u, OperationOptions options) {
+    private ConnectorObject toConnectorObject(UserType u, Set<String> attributesToGet, boolean allowPartialAttributeValues) {
         return toConnectorObject(u.username(), u.enabled(), u.userCreateDate(), u.userLastModifiedDate(),
-                u.userStatusAsString(), u.attributes(), options);
+                u.userStatusAsString(), u.attributes(), attributesToGet, allowPartialAttributeValues);
     }
 
     private boolean shouldReturn(Set<String> attrsToGetSet, String attr) {
@@ -571,13 +599,8 @@ public class CognitoUserPoolUserHandler {
 
     private ConnectorObject toConnectorObject(String username, boolean enabled,
                                               Instant userCreateDate, Instant userLastModifiedDate,
-                                              String status, List<AttributeType> attributes, OperationOptions options) {
-
-        String[] attributesToGet = options.getAttributesToGet();
-        Set<String> attrsToGetSet = null;
-        if (attributesToGet != null) {
-            attrsToGetSet = Stream.of(attributesToGet).collect(Collectors.toSet());
-        }
+                                              String status, List<AttributeType> attributes,
+                                              Set<String> attributesToGet, boolean allowPartialAttributeValues) {
 
         final ConnectorObjectBuilder builder = new ConnectorObjectBuilder()
                 .setObjectClass(USER_OBJECT_CLASS)
@@ -585,16 +608,16 @@ public class CognitoUserPoolUserHandler {
                 .setName(username);
 
         // Metadata
-        if (shouldReturn(attrsToGetSet, ENABLE_NAME)) {
+        if (shouldReturn(attributesToGet, ENABLE_NAME)) {
             builder.addAttribute(AttributeBuilder.buildEnabled(enabled));
         }
-        if (shouldReturn(attrsToGetSet, ATTR_USER_CREATE_DATE)) {
+        if (shouldReturn(attributesToGet, ATTR_USER_CREATE_DATE)) {
             builder.addAttribute(ATTR_USER_CREATE_DATE, CognitoUserPoolUtils.toZoneDateTime(userCreateDate));
         }
-        if (shouldReturn(attrsToGetSet, ATTR_USER_LAST_MODIFIED_DATE)) {
+        if (shouldReturn(attributesToGet, ATTR_USER_LAST_MODIFIED_DATE)) {
             builder.addAttribute(ATTR_USER_LAST_MODIFIED_DATE, CognitoUserPoolUtils.toZoneDateTime(userLastModifiedDate));
         }
-        if (shouldReturn(attrsToGetSet, ATTR_USER_STATUS)) {
+        if (shouldReturn(attributesToGet, ATTR_USER_STATUS)) {
             builder.addAttribute(ATTR_USER_STATUS, status);
         }
 
@@ -604,13 +627,13 @@ public class CognitoUserPoolUserHandler {
                 builder.setUid(a.value());
             } else {
                 AttributeInfo attributeInfo = schema.get(a.name());
-                if (shouldReturn(attrsToGetSet, attributeInfo.getName())) {
+                if (shouldReturn(attributesToGet, attributeInfo.getName())) {
                     builder.addAttribute(toConnectorAttribute(attributeInfo, a));
                 }
             }
         }
 
-        if (shouldReturnPartialAttributeValues(options)) {
+        if (allowPartialAttributeValues) {
             // Suppress fetching groups
             LOGGER.ok("Suppress fetching groups because return partial attribute values is requested");
 
@@ -619,11 +642,11 @@ public class CognitoUserPoolUserHandler {
             ab.addValue(Collections.EMPTY_LIST);
             builder.addAttribute(ab.build());
         } else {
-            if (attrsToGetSet == null) {
+            if (attributesToGet == null) {
                 // Suppress fetching groups default
                 LOGGER.ok("Suppress fetching groups because returned by default is true");
 
-            } else if (shouldReturn(attrsToGetSet, ATTR_GROUPS)) {
+            } else if (shouldReturn(attributesToGet, ATTR_GROUPS)) {
                 // Fetch groups
                 LOGGER.ok("Fetching groups because attributes to get is requested");
 
@@ -633,6 +656,10 @@ public class CognitoUserPoolUserHandler {
         }
 
         return builder.build();
+    }
+
+    private boolean isUserAttributes(String attrName) {
+        return schema.containsKey(attrName) && !NOT_USER_ATTRIBUTES.contains(attrName);
     }
 }
 
