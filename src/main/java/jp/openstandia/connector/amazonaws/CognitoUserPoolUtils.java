@@ -27,7 +27,10 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Provides utility methods
@@ -178,9 +181,20 @@ public class CognitoUserPoolUtils {
      * @param options
      * @return
      */
-    public static boolean shouldReturnPartialAttributeValues(OperationOptions options) {
+    public static boolean shouldAllowPartialAttributeValues(OperationOptions options) {
         // If the option isn't set from IDM, it may be null.
-        return options.getAllowPartialAttributeValues() == Boolean.TRUE;
+        return Boolean.TRUE.equals(options.getAllowPartialAttributeValues());
+    }
+
+    /**
+     * Check if RETURN_DEFAULT_ATTRIBUTES == true.
+     *
+     * @param options
+     * @return
+     */
+    public static boolean shouldReturnDefaultAttributes(OperationOptions options) {
+        // If the option isn't set from IDM, it may be null.
+        return Boolean.TRUE.equals(options.getReturnDefaultAttributes());
     }
 
     public static void invalidSchema(String name) throws InvalidAttributeValueException {
@@ -188,5 +202,36 @@ public class CognitoUserPoolUtils {
                 String.format("Cognito doesn't support to set '%s' attribute", name));
         exception.setAffectedAttributeNames(Arrays.asList(name));
         throw exception;
+    }
+
+    /**
+     * Create full set of ATTRIBUTES_TO_GET which is composed by RETURN_DEFAULT_ATTRIBUTES + ATTRIBUTES_TO_GET.
+     *
+     * @param schema
+     * @param options
+     * @return
+     */
+    public static Set<String> createFullAttributesToGet(Map<String, AttributeInfo> schema, OperationOptions options) {
+        Set<String> attributesToGet = null;
+        if (shouldReturnDefaultAttributes(options)) {
+            attributesToGet = new HashSet<>();
+            attributesToGet.addAll(toReturnedByDefaultAttributesSet(schema));
+        }
+        if (options.getAttributesToGet() != null) {
+            if (attributesToGet == null) {
+                attributesToGet = new HashSet<>();
+            }
+            for (String a : options.getAttributesToGet()) {
+                attributesToGet.add(a);
+            }
+        }
+        return attributesToGet;
+    }
+
+    private static Set<String> toReturnedByDefaultAttributesSet(Map<String, AttributeInfo> schema) {
+        return schema.entrySet().stream()
+                .filter(entry -> entry.getValue().isReturnedByDefault())
+                .map(entry -> entry.getKey())
+                .collect(Collectors.toSet());
     }
 }
