@@ -17,9 +17,7 @@ package jp.openstandia.connector.amazonaws;
 
 import org.identityconnectors.common.StringUtil;
 import org.identityconnectors.common.logging.Log;
-import org.identityconnectors.framework.common.exceptions.ConfigurationException;
-import org.identityconnectors.framework.common.exceptions.ConnectorException;
-import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
+import org.identityconnectors.framework.common.exceptions.*;
 import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
@@ -63,7 +61,12 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
     @Override
     public void init(Configuration configuration) {
         this.configuration = (CognitoUserPoolConfiguration) configuration;
-        authenticateResource();
+
+        try {
+            authenticateResource();
+        } catch (RuntimeException e) {
+            throw processRuntimeException(e);
+        }
 
         LOG.ok("Connector {0} successfully initialized", getClass().getName());
     }
@@ -118,33 +121,38 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
                 .userPoolId(configuration.getUserPoolID()).build());
         int status = result.sdkHttpResponse().statusCode();
         if (status != 200) {
-            throw new ConnectorException("Failed to describe user pool: " + configuration.getUserPoolID());
+            throw new ConnectorIOException("Failed to describe user pool: " + configuration.getUserPoolID());
         }
         return result.userPool();
     }
 
     @Override
     public Schema schema() {
-        UserPoolType userPoolType = describeUserPool();
+        try {
+            UserPoolType userPoolType = describeUserPool();
 
-        SchemaBuilder schemaBuilder = new SchemaBuilder(CognitoUserPoolConnector.class);
+            SchemaBuilder schemaBuilder = new SchemaBuilder(CognitoUserPoolConnector.class);
 
-        ObjectClassInfo userSchemaInfo = CognitoUserPoolUserHandler.getUserSchema(userPoolType);
-        schemaBuilder.defineObjectClass(userSchemaInfo);
+            ObjectClassInfo userSchemaInfo = CognitoUserPoolUserHandler.getUserSchema(userPoolType);
+            schemaBuilder.defineObjectClass(userSchemaInfo);
 
-        ObjectClassInfo groupSchemaInfo = CognitoUserPoolGroupHandler.getGroupSchema(userPoolType);
-        schemaBuilder.defineObjectClass(groupSchemaInfo);
+            ObjectClassInfo groupSchemaInfo = CognitoUserPoolGroupHandler.getGroupSchema(userPoolType);
+            schemaBuilder.defineObjectClass(groupSchemaInfo);
 
-        schemaBuilder.defineOperationOption(OperationOptionInfoBuilder.buildAttributesToGet(), SearchOp.class);
-        schemaBuilder.defineOperationOption(OperationOptionInfoBuilder.buildReturnDefaultAttributes(), SearchOp.class);
+            schemaBuilder.defineOperationOption(OperationOptionInfoBuilder.buildAttributesToGet(), SearchOp.class);
+            schemaBuilder.defineOperationOption(OperationOptionInfoBuilder.buildReturnDefaultAttributes(), SearchOp.class);
 
-        userSchemaMap = new HashMap<>();
-        userSchemaInfo.getAttributeInfo().stream()
-                .forEach(a -> userSchemaMap.put(a.getName(), a));
-        userSchemaMap.put(Uid.NAME, AttributeInfoBuilder.define("username").build());
-        userSchemaMap = Collections.unmodifiableMap(userSchemaMap);
+            userSchemaMap = new HashMap<>();
+            userSchemaInfo.getAttributeInfo().stream()
+                    .forEach(a -> userSchemaMap.put(a.getName(), a));
+            userSchemaMap.put(Uid.NAME, AttributeInfoBuilder.define("username").build());
+            userSchemaMap = Collections.unmodifiableMap(userSchemaMap);
 
-        return schemaBuilder.build();
+            return schemaBuilder.build();
+
+        } catch (RuntimeException e) {
+            throw processRuntimeException(e);
+        }
     }
 
     private Map<String, AttributeInfo> getUserSchemaMap() {
@@ -166,45 +174,58 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
             throw new InvalidAttributeValueException("Attributes not provided or empty");
         }
 
-        if (objectClass.equals(USER_OBJECT_CLASS)) {
-            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
-            return usersHandler.createUser(createAttributes);
+        try {
+            if (objectClass.equals(USER_OBJECT_CLASS)) {
+                CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
+                return usersHandler.createUser(createAttributes);
 
-        } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
-            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
-            return groupsHandler.createGroup(createAttributes);
+            } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
+                CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
+                return groupsHandler.createGroup(createAttributes);
 
-        } else {
-            throw new UnsupportedOperationException("Unsupported object class " + objectClass);
+            } else {
+                throw new InvalidAttributeValueException("Unsupported object class " + objectClass);
+            }
+        } catch  (RuntimeException e) {
+            throw processRuntimeException(e);
         }
     }
 
     @Override
     public Set<AttributeDelta> updateDelta(ObjectClass objectClass, Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
-        if (objectClass.equals(USER_OBJECT_CLASS)) {
-            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
-            return usersHandler.updateDelta(uid, modifications, options);
+        try {
+            if (objectClass.equals(USER_OBJECT_CLASS)) {
+                CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
+                return usersHandler.updateDelta(uid, modifications, options);
 
-        } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
-            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
-            return groupsHandler.updateDelta(uid, modifications, options);
+            } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
+                CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
+                return groupsHandler.updateDelta(uid, modifications, options);
+
+            } else {
+                throw new InvalidAttributeValueException("Unsupported object class " + objectClass);
+            }
+        } catch (RuntimeException e) {
+            throw processRuntimeException(e);
         }
-
-        throw new UnsupportedOperationException("Unsupported object class " + objectClass);
     }
 
     @Override
     public void delete(ObjectClass objectClass, Uid uid, OperationOptions options) {
-        if (objectClass.equals(USER_OBJECT_CLASS)) {
-            CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
-            usersHandler.deleteUser(uid, options);
+        try {
+            if (objectClass.equals(USER_OBJECT_CLASS)) {
+                CognitoUserPoolUserHandler usersHandler = new CognitoUserPoolUserHandler(configuration, client, getUserSchemaMap());
+                usersHandler.deleteUser(uid, options);
 
-        } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
-            CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
-            groupsHandler.deleteGroup(objectClass, uid, options);
+            } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
+                CognitoUserPoolGroupHandler groupsHandler = new CognitoUserPoolGroupHandler(configuration, client);
+                groupsHandler.deleteGroup(objectClass, uid, options);
 
-        } else {
-            throw new UnsupportedOperationException("Unsupported object class " + objectClass);
+            } else {
+                throw new InvalidAttributeValueException("Unsupported object class " + objectClass);
+            }
+        } catch (RuntimeException e) {
+            throw processRuntimeException(e);
         }
     }
 
@@ -222,6 +243,8 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
             } catch (UserNotFoundException e) {
                 // Don't throw UnknownUidException
                 return;
+            } catch (RuntimeException e) {
+                throw processRuntimeException(e);
             }
 
         } else if (objectClass.equals(GROUP_OBJECT_CLASS)) {
@@ -231,17 +254,23 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
             } catch (ResourceNotFoundException e) {
                 // Don't throw UnknownUidException
                 return;
+            } catch (RuntimeException e) {
+                throw processRuntimeException(e);
             }
 
         } else {
-            throw new UnsupportedOperationException("Unsupported object class " + objectClass);
+            throw new InvalidAttributeValueException("Unsupported object class " + objectClass);
         }
     }
 
     @Override
     public void test() {
-        dispose();
-        authenticateResource();
+        try {
+            dispose();
+            authenticateResource();
+        } catch (RuntimeException e) {
+            throw processRuntimeException(e);
+        }
     }
 
     @Override
@@ -258,5 +287,43 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
     @Override
     public void setInstanceName(String instanceName) {
         this.instanceName = instanceName;
+    }
+
+    protected ConnectorException processRuntimeException(RuntimeException e) {
+        if (e instanceof ConnectorException) {
+            return (ConnectorException) e;
+        }
+        if (e instanceof CognitoIdentityProviderException) {
+            return processCognitoIdentityProviderException((CognitoIdentityProviderException) e);
+        }
+        return new ConnectorException(e);
+    }
+
+    private ConnectorException processCognitoIdentityProviderException(CognitoIdentityProviderException e) {
+        if (e instanceof InvalidParameterException) {
+            return new InvalidAttributeValueException(e);
+        }
+        if (e instanceof UserNotFoundException) {
+            return new UnknownUidException(e);
+        }
+        if (e instanceof ResourceNotFoundException) {
+            return new UnknownUidException(e);
+        }
+        if (e instanceof UsernameExistsException) {
+            return new AlreadyExistsException(e);
+        }
+        if (e instanceof GroupExistsException) {
+            return new AlreadyExistsException(e);
+        }
+        if (e instanceof LimitExceededException) {
+            return RetryableException.wrap(e.getMessage(), e);
+        }
+        if (e instanceof TooManyRequestsException) {
+            return RetryableException.wrap(e.getMessage(), e);
+        }
+        if (e instanceof InternalErrorException) {
+            return RetryableException.wrap(e.getMessage(), e);
+        }
+        throw new ConnectorIOException(e);
     }
 }
