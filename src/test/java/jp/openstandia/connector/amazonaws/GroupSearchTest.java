@@ -76,6 +76,33 @@ class GroupSearchTest extends AbstractTest {
         assertEquals("role2", groups.get(1).getAttributeByName("RoleArn").getValue().get(0));
     }
 
+    @Test
+    void getAllUsersWithNotFound() {
+        // Given
+        mockClient.listGroupsPaginator(request -> {
+            ListGroupsIterable response = new ListGroupsIterable(mockClient, request);
+            return response;
+        });
+
+        mockClient.listGroups(request -> {
+            ListGroupsResponse.Builder builer = ListGroupsResponse.builder();
+
+            return buildSuccess(builer, ListGroupsResponse.class);
+        });
+
+        // When
+        List<ConnectorObject> groups = new ArrayList<>();
+        ResultsHandler handler = connectorObject -> {
+            groups.add(connectorObject);
+            return true;
+        };
+        connector.search(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS,
+                null, handler, new OperationOptionsBuilder().build());
+
+        // Then
+        assertEquals(0, groups.size());
+    }
+
     private GroupType newGroupType(String groupName, String description, Integer precedence, String roleArn) {
         return GroupType.builder()
                 .groupName(groupName)

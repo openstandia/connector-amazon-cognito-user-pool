@@ -18,12 +18,15 @@ package jp.openstandia.connector.amazonaws;
 import jp.openstandia.connector.amazonaws.testutil.AbstractTest;
 import org.identityconnectors.framework.common.objects.*;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.GetGroupRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.GetGroupResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.GroupType;
 
 import java.time.Instant;
+import java.util.function.Function;
 
 import static jp.openstandia.connector.amazonaws.testutil.MockClient.buildSuccess;
+import static jp.openstandia.connector.amazonaws.testutil.MockClient.groupNotFoundError;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GroupGetTest extends AbstractTest {
@@ -95,6 +98,27 @@ class GroupGetTest extends AbstractTest {
         assertNull(result.getAttributeByName("Description"));
         assertNull(result.getAttributeByName("Precedence"));
         assertNull(result.getAttributeByName("RoleArn"));
+    }
+
+
+    @Test
+    void getGroupWithNotFoundError() {
+        // Given
+        String groupName = "g1";
+        String description = "desc";
+        Integer precedence = 1;
+        String roleArn = "role";
+
+        mockClient.getGroup((Function<GetGroupRequest, GetGroupResponse>) request -> {
+            throw groupNotFoundError();
+        });
+
+        // When
+        ConnectorObject result = connector.getObject(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS,
+                new Uid(groupName, new Name(groupName)), new OperationOptionsBuilder().build());
+
+        // Then
+        assertNull(result);
     }
 
     private GroupType newGroupType(String groupName, String description, Integer precedence, String roleArn) {

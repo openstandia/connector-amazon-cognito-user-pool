@@ -17,6 +17,7 @@ package jp.openstandia.connector.amazonaws;
 
 import jp.openstandia.connector.amazonaws.testutil.AbstractTest;
 import org.identityconnectors.common.CollectionUtil;
+import org.identityconnectors.framework.common.exceptions.AlreadyExistsException;
 import org.identityconnectors.framework.common.objects.*;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
@@ -24,9 +25,11 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Function;
 
 import static jp.openstandia.connector.amazonaws.testutil.MockClient.buildSuccess;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static jp.openstandia.connector.amazonaws.testutil.MockClient.userExistsError;
+import static org.junit.jupiter.api.Assertions.*;
 
 class UserCreateTest extends AbstractTest {
 
@@ -111,6 +114,31 @@ class UserCreateTest extends AbstractTest {
         // Then
         assertEquals("00000000-0000-0000-0000-000000000001", uid.getUidValue());
         assertEquals("foo", uid.getNameHintValue());
+    }
+
+    @Test
+    void createUserWithAlreadyExistsError() {
+        // Given
+        String username = "foo";
+        String email = "foo@example.com";
+        String sub = "00000000-0000-0000-0000-000000000001";
+
+        Set<Attribute> attrs = new HashSet<>();
+        attrs.add(new Name(username));
+        attrs.add(AttributeBuilder.build("email", CollectionUtil.newSet(email)));
+        attrs.add(AttributeBuilder.buildPassword("secret".toCharArray()));
+
+        mockClient.adminCreateUser((Function<AdminCreateUserRequest, AdminCreateUserResponse>) request -> {
+            throw userExistsError();
+        });
+
+        // When
+        AlreadyExistsException e = assertThrows(AlreadyExistsException.class, () -> {
+            Uid uid = connector.create(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, attrs, new OperationOptionsBuilder().build());
+        });
+
+        // Then
+        assertNotNull(e);
     }
 
     private UserType newUserType(String sub, String username, String email) {

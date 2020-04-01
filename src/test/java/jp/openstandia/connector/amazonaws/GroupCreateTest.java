@@ -17,18 +17,21 @@ package jp.openstandia.connector.amazonaws;
 
 import jp.openstandia.connector.amazonaws.testutil.AbstractTest;
 import org.identityconnectors.common.CollectionUtil;
+import org.identityconnectors.framework.common.exceptions.AlreadyExistsException;
 import org.identityconnectors.framework.common.objects.*;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.CreateGroupRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.CreateGroupResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.GroupType;
 
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Function;
 
 import static jp.openstandia.connector.amazonaws.testutil.MockClient.buildSuccess;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static jp.openstandia.connector.amazonaws.testutil.MockClient.groupExistsError;
+import static org.junit.jupiter.api.Assertions.*;
 
 class GroupCreateTest extends AbstractTest {
 
@@ -58,6 +61,33 @@ class GroupCreateTest extends AbstractTest {
         // Then
         assertEquals(groupName, uid.getUidValue());
         assertNull(uid.getNameHint(), "Group shouldn't include Name object in the Uid");
+    }
+
+    @Test
+    void createGroupWithAlreadyExistsError() {
+        // Given
+        String groupName = "g1";
+        String description = "desc";
+        Integer precedence = 1;
+        String roleArn = "role";
+
+        Set<Attribute> attrs = new HashSet<>();
+        attrs.add(new Name(groupName));
+        attrs.add(AttributeBuilder.build("Description", CollectionUtil.newSet(description)));
+        attrs.add(AttributeBuilder.build("Precedence", CollectionUtil.newSet(precedence)));
+        attrs.add(AttributeBuilder.build("RoleArn", CollectionUtil.newSet(roleArn)));
+
+        mockClient.createGroup((Function<CreateGroupRequest, CreateGroupResponse>) request -> {
+            throw groupExistsError();
+        });
+
+        // When
+        AlreadyExistsException e = assertThrows(AlreadyExistsException.class, () -> {
+            Uid uid = connector.create(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS, attrs, new OperationOptionsBuilder().build());
+        });
+
+        // Then
+        assertNotNull(e);
     }
 
     private GroupType newGroupType(String groupName, String description, Integer precedence, String roleArn) {

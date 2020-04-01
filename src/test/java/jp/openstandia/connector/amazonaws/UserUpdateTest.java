@@ -17,14 +17,17 @@ package jp.openstandia.connector.amazonaws;
 
 import jp.openstandia.connector.amazonaws.testutil.AbstractTest;
 import org.identityconnectors.common.CollectionUtil;
+import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static jp.openstandia.connector.amazonaws.testutil.MockClient.buildSuccess;
+import static jp.openstandia.connector.amazonaws.testutil.MockClient.userNotFoundError;
 import static org.junit.jupiter.api.Assertions.*;
 
 class UserUpdateTest extends AbstractTest {
@@ -261,5 +264,30 @@ class UserUpdateTest extends AbstractTest {
         assertEquals(addGroup2, addGroup.get(1));
         assertEquals(removeGroup1, removeGroup.get(0));
         assertEquals(removeGroup2, removeGroup.get(1));
+    }
+
+    @Test
+    void updateUserWithNotFoundError() {
+        // Given
+        String username = "foo";
+        String email = "foo@example.com";
+        String newEmail = "bar@example.com";
+        String sub = "00000000-0000-0000-0000-000000000001";
+
+        Set<AttributeDelta> modifications = new HashSet<>();
+        modifications.add(AttributeDeltaBuilder.build("email", CollectionUtil.newSet(newEmail)));
+
+        mockClient.adminUpdateUserAttributes((Function<AdminUpdateUserAttributesRequest, AdminUpdateUserAttributesResponse>) request -> {
+            throw userNotFoundError();
+        });
+
+        // When
+        UnknownUidException e = assertThrows(UnknownUidException.class, () -> {
+            Set<AttributeDelta> updated = connector.updateDelta(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
+                    new Uid(sub, new Name(username)), modifications, new OperationOptionsBuilder().build());
+        });
+
+        // Then
+        assertNotNull(e);
     }
 }

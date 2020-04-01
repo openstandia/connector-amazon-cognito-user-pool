@@ -98,6 +98,22 @@ public class MockClient implements CognitoIdentityProviderClient {
         return (T) response;
     }
 
+    public static UsernameExistsException userExistsError() {
+        return UsernameExistsException.builder().statusCode(400).build();
+    }
+
+    public static UserNotFoundException userNotFoundError() {
+        return UserNotFoundException.builder().statusCode(400).build();
+    }
+
+    public static GroupExistsException groupExistsError() {
+        return GroupExistsException.builder().statusCode(400).build();
+    }
+
+    public static ResourceNotFoundException groupNotFoundError() {
+        return ResourceNotFoundException.builder().statusCode(400).build();
+    }
+
     @Override
     public String serviceName() {
         return "mock";

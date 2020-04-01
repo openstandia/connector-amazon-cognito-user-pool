@@ -74,6 +74,33 @@ class UserSearchTest extends AbstractTest {
         assertEquals("user2@example.com", users.get(1).getAttributeByName("email").getValue().get(0));
     }
 
+    @Test
+    void getAllUsersWithNotFound() {
+        // Given
+        mockClient.listUsersPaginator(request -> {
+            ListUsersIterable response = new ListUsersIterable(mockClient, request);
+            return response;
+        });
+
+        mockClient.listUsers(request -> {
+            ListUsersResponse.Builder builer = ListUsersResponse.builder();
+
+            return buildSuccess(builer, ListUsersResponse.class);
+        });
+
+        // When
+        List<ConnectorObject> users = new ArrayList<>();
+        ResultsHandler handler = connectorObject -> {
+            users.add(connectorObject);
+            return true;
+        };
+        connector.search(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
+                null, handler, new OperationOptionsBuilder().build());
+
+        // Then
+        assertEquals(0, users.size());
+    }
+
     private UserType newUserType(String sub, String username, String email) {
         return UserType.builder()
                 .username(username)

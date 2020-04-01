@@ -17,16 +17,20 @@ package jp.openstandia.connector.amazonaws;
 
 import jp.openstandia.connector.amazonaws.testutil.AbstractTest;
 import org.identityconnectors.common.CollectionUtil;
+import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.UpdateGroupRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.UpdateGroupResponse;
 
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static jp.openstandia.connector.amazonaws.testutil.MockClient.buildSuccess;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static jp.openstandia.connector.amazonaws.testutil.MockClient.groupNotFoundError;
+import static org.junit.jupiter.api.Assertions.*;
 
 class GroupUpdateTest extends AbstractTest {
 
@@ -55,5 +59,30 @@ class GroupUpdateTest extends AbstractTest {
 
         // Then
         assertEquals(newDescription, requestedDesc.get());
+    }
+
+    @Test
+    void updateGroupWithNotFoundError() {
+        // Given
+        String groupName = "g1";
+        String newDescription = "newDesc";
+        Integer precedence = 1;
+        String roleArn = "role";
+
+        Set<AttributeDelta> modifications = new HashSet<>();
+        modifications.add(AttributeDeltaBuilder.build("Description", CollectionUtil.newSet(newDescription)));
+
+        mockClient.updateGroup((Function<UpdateGroupRequest, UpdateGroupResponse>) request -> {
+            throw groupNotFoundError();
+        });
+
+        // When
+        UnknownUidException e = assertThrows(UnknownUidException.class, () -> {
+            Set<AttributeDelta> updated = connector.updateDelta(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS,
+                    new Uid(groupName, new Name(groupName)), modifications, new OperationOptionsBuilder().build());
+        });
+
+        // Then
+        assertNotNull(e);
     }
 }

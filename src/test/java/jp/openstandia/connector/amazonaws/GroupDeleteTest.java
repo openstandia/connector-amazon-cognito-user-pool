@@ -16,6 +16,7 @@
 package jp.openstandia.connector.amazonaws;
 
 import jp.openstandia.connector.amazonaws.testutil.AbstractTest;
+import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.Name;
 import org.identityconnectors.framework.common.objects.OperationOptionsBuilder;
 import org.identityconnectors.framework.common.objects.Uid;
@@ -27,9 +28,11 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static jp.openstandia.connector.amazonaws.testutil.MockClient.buildSuccess;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static jp.openstandia.connector.amazonaws.testutil.MockClient.groupNotFoundError;
+import static org.junit.jupiter.api.Assertions.*;
 
 class GroupDeleteTest extends AbstractTest {
 
@@ -71,6 +74,26 @@ class GroupDeleteTest extends AbstractTest {
         assertEquals(groupName, requestedGroupName.get());
         assertEquals(1, removeUser.size());
         assertEquals("user", removeUser.get(0));
+    }
+
+
+    @Test
+    void deleteGroupWithNotFoundError() {
+        // Given
+        String groupName = "g1";
+
+        mockClient.listUsersInGroupPaginator((Function<ListUsersInGroupRequest, ListUsersInGroupIterable>) request -> {
+            throw groupNotFoundError();
+        });
+
+        // When
+        UnknownUidException e = assertThrows(UnknownUidException.class, () -> {
+            connector.delete(CognitoUserPoolGroupHandler.GROUP_OBJECT_CLASS,
+                    new Uid(groupName, new Name(groupName)), new OperationOptionsBuilder().build());
+        });
+
+        // Then
+        assertNotNull(e);
     }
 
     private UserType newUserType(String username, String sub, String email) {

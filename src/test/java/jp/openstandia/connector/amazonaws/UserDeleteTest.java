@@ -16,16 +16,20 @@
 package jp.openstandia.connector.amazonaws;
 
 import jp.openstandia.connector.amazonaws.testutil.AbstractTest;
+import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.Name;
 import org.identityconnectors.framework.common.objects.OperationOptionsBuilder;
 import org.identityconnectors.framework.common.objects.Uid;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminDeleteUserRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminDeleteUserResponse;
 
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static jp.openstandia.connector.amazonaws.testutil.MockClient.buildSuccess;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static jp.openstandia.connector.amazonaws.testutil.MockClient.userNotFoundError;
+import static org.junit.jupiter.api.Assertions.*;
 
 class UserDeleteTest extends AbstractTest {
 
@@ -48,5 +52,26 @@ class UserDeleteTest extends AbstractTest {
 
         // Then
         assertEquals(username, requestedUsername.get());
+    }
+
+    @Test
+    void deleteuserWithNotFoundError() {
+        // Given
+        String username = "foo";
+        String sub = "00000000-0000-0000-0000-000000000001";
+
+        AtomicReference<String> requestedUsername = new AtomicReference<>();
+        mockClient.adminDeleteUser((Function<AdminDeleteUserRequest, AdminDeleteUserResponse>) request -> {
+            throw userNotFoundError();
+        });
+
+        // When
+        UnknownUidException e = assertThrows(UnknownUidException.class, () -> {
+            connector.delete(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
+                    new Uid(sub, new Name(username)), new OperationOptionsBuilder().build());
+        });
+
+        // Then
+        assertNotNull(e);
     }
 }
