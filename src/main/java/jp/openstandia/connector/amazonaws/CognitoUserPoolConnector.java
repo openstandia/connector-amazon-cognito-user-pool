@@ -186,7 +186,7 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
             } else {
                 throw new InvalidAttributeValueException("Unsupported object class " + objectClass);
             }
-        } catch  (RuntimeException e) {
+        } catch (RuntimeException e) {
             throw processRuntimeException(e);
         }
     }

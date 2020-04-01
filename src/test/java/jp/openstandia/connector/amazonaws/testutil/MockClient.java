@@ -72,7 +72,7 @@ public class MockClient implements CognitoIdentityProviderClient {
         adminRemoveUserFromGroup = null;
 
         createGroup = null;
-        updateGroup= null;
+        updateGroup = null;
         deleteGroup = null;
         listUsersInGroup = null;
         listUsersInGroupPaginator = null;

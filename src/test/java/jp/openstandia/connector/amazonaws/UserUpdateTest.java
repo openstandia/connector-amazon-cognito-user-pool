@@ -20,100 +20,14 @@ import org.identityconnectors.common.CollectionUtil;
 import org.identityconnectors.framework.common.objects.*;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
-import software.amazon.awssdk.services.cognitoidentityprovider.paginators.ListUsersIterable;
 
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static jp.openstandia.connector.amazonaws.testutil.MockClient.buildSuccess;
 import static org.junit.jupiter.api.Assertions.*;
 
-class UserTest extends AbstractTest {
-
-    @Test
-    void createUser() {
-        // Given
-        String username = "foo";
-        String email = "foo@example.com";
-        String sub = "00000000-0000-0000-0000-000000000001";
-
-        Set<Attribute> attrs = new HashSet<>();
-        attrs.add(new Name(username));
-        attrs.add(AttributeBuilder.build("email", CollectionUtil.newSet(email)));
-
-        mockClient.adminCreateUser((request) -> {
-            AdminCreateUserResponse.Builder builder = AdminCreateUserResponse.builder()
-                    .user(newUserType(sub, username, email));
-            return buildSuccess(builder, AdminCreateUserResponse.class);
-        });
-
-        // When
-        Uid uid = connector.create(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, attrs, new OperationOptionsBuilder().build());
-
-        // Then
-        assertEquals(sub, uid.getUidValue());
-        assertEquals(username, uid.getNameHintValue());
-    }
-
-    @Test
-    void createUserWithDisabled() {
-        // Given
-        String username = "foo";
-        String email = "foo@example.com";
-        String sub = "00000000-0000-0000-0000-000000000001";
-
-        Set<Attribute> attrs = new HashSet<>();
-        attrs.add(new Name(username));
-        attrs.add(AttributeBuilder.build("email", CollectionUtil.newSet(email)));
-        attrs.add(AttributeBuilder.buildEnabled(false));
-
-        mockClient.adminCreateUser(request -> {
-            AdminCreateUserResponse.Builder builder = AdminCreateUserResponse.builder()
-                    .user(newUserType(sub, username, email));
-            return buildSuccess(builder, AdminCreateUserResponse.class);
-        });
-        mockClient.adminDisableUser(request -> {
-            return buildSuccess(AdminDisableUserResponse.builder(), AdminDisableUserResponse.class);
-        });
-
-        // When
-        Uid uid = connector.create(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, attrs, new OperationOptionsBuilder().build());
-
-        // Then
-        assertEquals("00000000-0000-0000-0000-000000000001", uid.getUidValue());
-        assertEquals("foo", uid.getNameHintValue());
-    }
-
-    @Test
-    void createUserWithPassword() {
-        // Given
-        String username = "foo";
-        String email = "foo@example.com";
-        String sub = "00000000-0000-0000-0000-000000000001";
-
-        Set<Attribute> attrs = new HashSet<>();
-        attrs.add(new Name(username));
-        attrs.add(AttributeBuilder.build("email", CollectionUtil.newSet(email)));
-        attrs.add(AttributeBuilder.buildPassword("secret".toCharArray()));
-
-        mockClient.adminCreateUser(request -> {
-            AdminCreateUserResponse.Builder builder = AdminCreateUserResponse.builder()
-                    .user(newUserType(sub, username, email));
-            return buildSuccess(builder, AdminCreateUserResponse.class);
-        });
-        mockClient.adminSetUserPassword(request -> {
-            return buildSuccess(AdminSetUserPasswordResponse.builder(), AdminSetUserPasswordResponse.class);
-        });
-
-        // When
-        Uid uid = connector.create(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, attrs, new OperationOptionsBuilder().build());
-
-        // Then
-        assertEquals("00000000-0000-0000-0000-000000000001", uid.getUidValue());
-        assertEquals("foo", uid.getNameHintValue());
-    }
-
+class UserUpdateTest extends AbstractTest {
 
     @Test
     void updateUser() {
@@ -252,27 +166,6 @@ class UserTest extends AbstractTest {
     }
 
     @Test
-    void deleteuser() {
-        // Given
-        String username = "foo";
-        String sub = "00000000-0000-0000-0000-000000000001";
-
-        AtomicReference<String> requestedUsername = new AtomicReference<>();
-        mockClient.adminDeleteUser(request -> {
-            requestedUsername.set(request.username());
-
-            return buildSuccess(AdminDeleteUserResponse.builder(), AdminDeleteUserResponse.class);
-        });
-
-        // When
-        connector.delete(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
-                new Uid(sub, new Name(username)), new OperationOptionsBuilder().build());
-
-        // Then
-        assertEquals(username, requestedUsername.get());
-    }
-
-    @Test
     void updateUserWithAddGroup() {
         // Given
         String username = "foo";
@@ -368,148 +261,5 @@ class UserTest extends AbstractTest {
         assertEquals(addGroup2, addGroup.get(1));
         assertEquals(removeGroup1, removeGroup.get(0));
         assertEquals(removeGroup2, removeGroup.get(1));
-    }
-
-    @Test
-    void getUser() {
-        // Given
-        String username = "foo";
-        String sub = "00000000-0000-0000-0000-000000000001";
-        String email = "foo@example.com";
-
-        mockClient.adminGetUser(request -> {
-            AdminGetUserResponse.Builder builer = AdminGetUserResponse.builder()
-                    .username(username)
-                    .enabled(true)
-                    .userCreateDate(Instant.now())
-                    .userLastModifiedDate(Instant.now())
-                    .userAttributes(
-                            AttributeType.builder()
-                                    .name("sub")
-                                    .value(sub)
-                                    .build(),
-                            AttributeType.builder()
-                                    .name("email")
-                                    .value(email)
-                                    .build()
-                    );
-
-            return buildSuccess(builer, AdminGetUserResponse.class);
-        });
-
-        // When
-        ConnectorObject result = connector.getObject(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
-                new Uid(sub, new Name(username)), new OperationOptionsBuilder().build());
-
-        // Then
-        assertEquals(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, result.getObjectClass());
-        assertEquals(sub, result.getUid().getUidValue());
-        assertEquals(username, result.getName().getNameValue());
-        assertNotNull(result.getAttributeByName("email"));
-        assertEquals(email, result.getAttributeByName("email").getValue().get(0));
-    }
-
-    @Test
-    void getUserWithAttributesToGet() {
-        // Given
-        String username = "foo";
-        String sub = "00000000-0000-0000-0000-000000000001";
-        String email = "foo@example.com";
-
-        mockClient.adminGetUser(request -> {
-            AdminGetUserResponse.Builder builer = AdminGetUserResponse.builder()
-                    .username(username)
-                    .enabled(true)
-                    .userCreateDate(Instant.now())
-                    .userLastModifiedDate(Instant.now())
-                    .userAttributes(
-                            AttributeType.builder()
-                                    .name("sub")
-                                    .value(sub)
-                                    .build(),
-                            AttributeType.builder()
-                                    .name("email")
-                                    .value(email)
-                                    .build()
-                    );
-
-            return buildSuccess(builer, AdminGetUserResponse.class);
-        });
-        OperationOptions options = new OperationOptionsBuilder()
-                .setAttributesToGet(
-                        Uid.NAME,
-                        Name.NAME,
-                        "UserCreateDate"
-                ).build();
-
-        // When
-        ConnectorObject result = connector.getObject(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
-                new Uid(sub, new Name(username)), options);
-
-        // Then
-        assertEquals(3, result.getAttributes().size());
-        assertEquals(sub, result.getUid().getUidValue());
-        assertEquals(username, result.getName().getNameValue());
-        assertNull(result.getAttributeByName("email"));
-        assertNotNull(result.getAttributeByName("UserCreateDate"));
-    }
-
-    @Test
-    void getAllUsers() {
-        // Given
-        mockClient.listUsersPaginator(request -> {
-            ListUsersIterable response = new ListUsersIterable(mockClient, request);
-            return response;
-        });
-
-        mockClient.listUsers(request -> {
-            ListUsersResponse.Builder builer = ListUsersResponse.builder()
-                    .users(
-                            newUserType("sub1", "user1", "user1@example.com"),
-                            newUserType("sub2", "user2", "user2@example.com")
-                    );
-
-            return buildSuccess(builer, ListUsersResponse.class);
-        });
-
-        // When
-        List<ConnectorObject> users = new ArrayList<>();
-        ResultsHandler handler = connectorObject -> {
-            users.add(connectorObject);
-            return true;
-        };
-        connector.search(CognitoUserPoolUserHandler.USER_OBJECT_CLASS,
-                null, handler, new OperationOptionsBuilder().build());
-
-        // Then
-        assertEquals(2, users.size());
-        assertEquals(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, users.get(0).getObjectClass());
-        assertEquals("sub1", users.get(0).getUid().getUidValue());
-        assertEquals("user1", users.get(0).getName().getNameValue());
-        assertEquals("user1@example.com", users.get(0).getAttributeByName("email").getValue().get(0));
-        assertEquals(CognitoUserPoolUserHandler.USER_OBJECT_CLASS, users.get(1).getObjectClass());
-        assertEquals("sub2", users.get(1).getUid().getUidValue());
-        assertEquals("user2", users.get(1).getName().getNameValue());
-        assertEquals("user2@example.com", users.get(1).getAttributeByName("email").getValue().get(0));
-    }
-
-    private UserType newUserType(String sub, String username, String email) {
-        return UserType.builder()
-                .username(username)
-                .enabled(true)
-                .userStatus(UserStatusType.FORCE_CHANGE_PASSWORD)
-                .userCreateDate(Instant.now())
-                .userLastModifiedDate(Instant.now())
-                .attributes(
-                        AttributeType.builder()
-                                .name("sub")
-                                .value(sub)
-                                .build(),
-                        AttributeType.builder()
-                                .name("email")
-                                .value(email)
-                                .build()
-                )
-                .build();
     }
 }
