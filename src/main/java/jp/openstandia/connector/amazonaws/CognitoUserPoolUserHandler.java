@@ -120,9 +120,14 @@ public class CognitoUserPoolUserHandler {
                 .setRequired(true)
                 .setUpdateable(false)
                 .setNativeName(ATTR_USERNAME);
-        Boolean caseSensitive = userPoolType.usernameConfiguration().caseSensitive();
-        if (!caseSensitive) {
-            usernameBuilder.setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE);
+        Boolean caseSensitive;
+        if (userPoolType.usernameConfiguration() != null) {
+            caseSensitive = userPoolType.usernameConfiguration().caseSensitive();
+            if (!caseSensitive) {
+                usernameBuilder.setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE);
+            }
+        } else {
+            caseSensitive = true;
         }
         builder.addAttributeInfo(usernameBuilder.build());
 
