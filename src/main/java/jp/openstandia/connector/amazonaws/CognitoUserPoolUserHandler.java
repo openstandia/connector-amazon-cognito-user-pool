@@ -252,10 +252,13 @@ public class CognitoUserPoolUserHandler {
             newUser.username = UUID.randomUUID().toString();
         }
 
+        MessageActionType messageAction = configuration.isSuppressInvitationMessageEnabled() ? MessageActionType.SUPPRESS : MessageActionType.RESEND;
+
         AdminCreateUserRequest request = AdminCreateUserRequest.builder()
                 .userPoolId(configuration.getUserPoolID())
                 .username(newUser.username)
                 .userAttributes(newUser.userAttributes)
+                .messageAction(messageAction)
                 .build();
 
         AdminCreateUserResponse result = client.adminCreateUser(request);

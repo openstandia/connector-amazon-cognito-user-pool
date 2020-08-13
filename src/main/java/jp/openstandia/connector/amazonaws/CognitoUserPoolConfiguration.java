@@ -32,6 +32,7 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
     private int httpProxyPort;
     private String httpProxyUser;
     private GuardedString httpProxyPassword;
+    private boolean suppressInvitationMessageEnabled = true;
 
     @ConfigurationProperty(
             order = 1,
@@ -147,6 +148,20 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
 
     public void setHttpProxyPassword(GuardedString httpProxyPassword) {
         this.httpProxyPassword = httpProxyPassword;
+    }
+
+    @ConfigurationProperty(
+            order = 9,
+            displayMessageKey = "Suppress Invitation Message",
+            helpMessageKey = "If enabled, suppress sending invitation message when creating the user. Default: true",
+            required = false,
+            confidential = false)
+    public boolean isSuppressInvitationMessageEnabled() {
+        return suppressInvitationMessageEnabled;
+    }
+
+    public void setSuppressInvitationMessageEnabled(boolean suppressInvitationMessageEnabled) {
+        this.suppressInvitationMessageEnabled = suppressInvitationMessageEnabled;
     }
 
     @Override
