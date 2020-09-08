@@ -32,6 +32,9 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClientBuilder;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.*;
+import software.amazon.awssdk.services.sts.StsClient;
+import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
+import software.amazon.awssdk.services.sts.model.AssumeRoleRequest;
 
 import java.net.URI;
 import java.util.Collections;
@@ -72,29 +75,7 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
     }
 
     protected void authenticateResource() {
-        final AwsCredentialsProvider[] cp = {DefaultCredentialsProvider.create()};
-        if (configuration.getAWSAccessKeyID() != null && configuration.getAWSSecretAccessKey() != null) {
-            configuration.getAWSAccessKeyID().access(c -> {
-                configuration.getAWSSecretAccessKey().access(s -> {
-                    AwsCredentials cred = AwsBasicCredentials.create(String.valueOf(c), String.valueOf(s));
-                    cp[0] = StaticCredentialsProvider.create(cred);
-                });
-            });
-        }
-
-        CognitoIdentityProviderClientBuilder builder = CognitoIdentityProviderClient.builder().credentialsProvider(cp[0]);
-
-        String defaultRegion = configuration.getDefaultRegion();
-        if (StringUtil.isNotEmpty(defaultRegion)) {
-            try {
-                Region region = Region.of(defaultRegion);
-                builder.region(region);
-            } catch (IllegalArgumentException e) {
-                LOG.error(e, "Invalid default region: {0}", defaultRegion);
-                throw new ConfigurationException("Invalid default region: " + defaultRegion);
-            }
-        }
-
+        // Setup http proxy aware httpClient
         ApacheHttpClient.Builder httpClientBuilder = ApacheHttpClient.builder();
 
         if (StringUtil.isNotEmpty(configuration.getHttpProxyHost())) {
@@ -108,6 +89,55 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
                 });
             }
             httpClientBuilder.proxyConfiguration(proxyBuilder.build());
+        }
+
+        // Setup AWS credential using IAM Role or specified access key
+        final AwsCredentialsProvider[] cp = {DefaultCredentialsProvider.create()};
+        if (configuration.getAWSAccessKeyID() != null && configuration.getAWSSecretAccessKey() != null) {
+            configuration.getAWSAccessKeyID().access(c -> {
+                configuration.getAWSSecretAccessKey().access(s -> {
+                    AwsCredentials cred = AwsBasicCredentials.create(String.valueOf(c), String.valueOf(s));
+                    cp[0] = StaticCredentialsProvider.create(cred);
+                });
+            });
+        }
+
+        // If assumeRoleArn is configured, override AWS credential by getting temporary credential.
+        if (StringUtil.isNotEmpty(configuration.getAssumeRoleArn())) {
+            StsClient stsClient = StsClient.builder()
+                    .credentialsProvider(cp[0])
+                    .httpClientBuilder(httpClientBuilder).build();
+
+            AssumeRoleRequest.Builder builder = AssumeRoleRequest.builder()
+                    .roleArn(configuration.getAssumeRoleArn());
+            if (StringUtil.isNotEmpty(configuration.getAssumeRoleExternalId())) {
+                builder.externalId(configuration.getAssumeRoleExternalId());
+            }
+            AssumeRoleRequest req = builder
+                    .durationSeconds(configuration.getAssumeRoleDurationSeconds())
+                    .roleSessionName("identity-connector")
+                    .build();
+
+            StsAssumeRoleCredentialsProvider provider = StsAssumeRoleCredentialsProvider.builder()
+                    .stsClient(stsClient)
+                    .refreshRequest(req)
+                    .build();
+
+            cp[0] = provider;
+        }
+
+        // Finally, setup cognito client using http client and AWS credential
+        CognitoIdentityProviderClientBuilder builder = CognitoIdentityProviderClient.builder().credentialsProvider(cp[0]);
+
+        String region = configuration.getRegion();
+        if (StringUtil.isNotEmpty(region)) {
+            try {
+                Region r = Region.of(region);
+                builder.region(r);
+            } catch (IllegalArgumentException e) {
+                LOG.error(e, "Invalid AWS region: {0}", region);
+                throw new ConfigurationException("Invalid AWS region: " + region);
+            }
         }
 
         client = builder.httpClientBuilder(httpClientBuilder).build();

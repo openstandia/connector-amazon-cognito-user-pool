@@ -27,7 +27,10 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
     private String userPoolID;
     private GuardedString awsAccessKeyID;
     private GuardedString awsSecretAccessKey;
-    private String defaultRegion;
+    private String region;
+    private String assumeRoleArn;
+    private String assumeRoleExternalId;
+    private int assumeRoleDurationSeconds = 3600;
     private String httpProxyHost;
     private int httpProxyPort;
     private String httpProxyUser;
@@ -82,20 +85,62 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
 
     @ConfigurationProperty(
             order = 4,
-            displayMessageKey = "Default Region",
-            helpMessageKey = "Default Region",
-            required = false,
+            displayMessageKey = "Region",
+            helpMessageKey = "Region",
+            required = true,
             confidential = false)
-    public String getDefaultRegion() {
-        return defaultRegion;
+    public String getRegion() {
+        return region;
     }
 
-    public void setDefaultRegion(String defaultRegion) {
-        this.defaultRegion = defaultRegion;
+    public void setRegion(String region) {
+        this.region = region;
     }
 
     @ConfigurationProperty(
             order = 5,
+            displayMessageKey = "Assume Role Arn",
+            helpMessageKey = "Assume Role Arn",
+            required = false,
+            confidential = false)
+    public String getAssumeRoleArn() {
+        return assumeRoleArn;
+    }
+
+    public void setAssumeRoleArn(String assumeRoleArn) {
+        this.assumeRoleArn = assumeRoleArn;
+    }
+
+    @ConfigurationProperty(
+            order = 6,
+            displayMessageKey = "Assume Role External Id",
+            helpMessageKey = "Assume Role External Id",
+            required = false,
+            confidential = false)
+    public String getAssumeRoleExternalId() {
+        return assumeRoleExternalId;
+    }
+
+    public void setAssumeRoleExternalId(String assumeRoleExternalId) {
+        this.assumeRoleExternalId = assumeRoleExternalId;
+    }
+
+    @ConfigurationProperty(
+            order = 7,
+            displayMessageKey = "Assume Role Duration Seconds",
+            helpMessageKey = "Assume Role Duration Seconds (Default: 3600 seconds)",
+            required = false,
+            confidential = false)
+    public int getAssumeRoleDurationSeconds() {
+        return assumeRoleDurationSeconds;
+    }
+
+    public void setAssumeRoleDurationSeconds(int assumeRoleDurationSeconds) {
+        this.assumeRoleDurationSeconds = assumeRoleDurationSeconds;
+    }
+
+    @ConfigurationProperty(
+            order = 8,
             displayMessageKey = "HTTP Proxy Host",
             helpMessageKey = "Hostname for the HTTP Proxy",
             required = false,
@@ -109,7 +154,7 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
     }
 
     @ConfigurationProperty(
-            order = 6,
+            order = 9,
             displayMessageKey = "HTTP Proxy Port",
             helpMessageKey = "Port for the HTTP Proxy",
             required = false,
@@ -123,7 +168,7 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
     }
 
     @ConfigurationProperty(
-            order = 7,
+            order = 10,
             displayMessageKey = "HTTP Proxy User",
             helpMessageKey = "Username for the HTTP Proxy Authentication",
             required = false,
@@ -137,7 +182,7 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
     }
 
     @ConfigurationProperty(
-            order = 8,
+            order = 11,
             displayMessageKey = "HTTP Proxy Password",
             helpMessageKey = "Password for the HTTP Proxy Authentication",
             required = false,
@@ -151,7 +196,7 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
     }
 
     @ConfigurationProperty(
-            order = 9,
+            order = 12,
             displayMessageKey = "Suppress Invitation Message",
             helpMessageKey = "If enabled, suppress sending invitation message when creating the user. Default: true",
             required = false,
@@ -166,11 +211,11 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
 
     @Override
     public void validate() {
-        if (StringUtil.isNotEmpty(getDefaultRegion())) {
+        if (StringUtil.isNotEmpty(getRegion())) {
             try {
-                Region.of(getDefaultRegion());
+                Region.of(getRegion());
             } catch (IllegalArgumentException e) {
-                throw new ConfigurationException("Invalid AWS Region name: " + getDefaultRegion());
+                throw new ConfigurationException("Invalid AWS Region name: " + getRegion());
             }
         }
     }
