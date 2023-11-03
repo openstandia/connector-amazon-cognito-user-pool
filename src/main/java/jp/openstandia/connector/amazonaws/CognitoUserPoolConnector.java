@@ -140,6 +140,11 @@ public class CognitoUserPoolConnector implements PoolableConnector, CreateOp, Up
             }
         }
 
+        String endpointOverride = configuration.getEndpointOverride();
+        if (StringUtil.isNotEmpty(endpointOverride)) {
+            builder.endpointOverride(URI.create(endpointOverride));
+        }
+
         client = builder.httpClientBuilder(httpClientBuilder).build();
 
         // Verify we can access the user pool
