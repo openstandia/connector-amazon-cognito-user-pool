@@ -36,6 +36,7 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
     private String httpProxyUser;
     private GuardedString httpProxyPassword;
     private boolean suppressInvitationMessageEnabled = true;
+    private String endpointOverride;
 
     @ConfigurationProperty(
             order = 1,
@@ -207,6 +208,20 @@ public class CognitoUserPoolConfiguration extends AbstractConfiguration {
 
     public void setSuppressInvitationMessageEnabled(boolean suppressInvitationMessageEnabled) {
         this.suppressInvitationMessageEnabled = suppressInvitationMessageEnabled;
+    }
+
+    @ConfigurationProperty(
+            order = 13,
+            displayMessageKey = "Endpoint Override",
+            helpMessageKey = "Override the URL of the Amazon Cognito endpoint (e.g. mock server URL).",
+            required = false,
+            confidential = false)
+    public String getEndpointOverride() {
+        return endpointOverride;
+    }
+
+    public void setEndpointOverride(String endpointOverride) {
+        this.endpointOverride = endpointOverride;
     }
 
     @Override
