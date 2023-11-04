@@ -12,7 +12,7 @@
 
     <groupId>jp.openstandia</groupId>
     <artifactId>connector-amazon-cognito-user-pool</artifactId>
-    <version>1.1.2-SNAPSHOT</version>
+    <version>1.2.0</version>
     <packaging>jar</packaging>
 
     <name>Amazon Cognito User Pool Connector</name>
